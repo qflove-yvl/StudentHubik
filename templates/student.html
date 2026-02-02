@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Кабинет студента{% endblock %}
+
+{% block content %}
+<h2>Мой дневник</h2>
+
+<div class="features">
+    {% for grade in grades %}
+    <div class="card">
+        <h3>{{ grade.subject.name }}</h3>
+        <p>Оценка: <strong>{{ grade.value }}</strong></p>
+        <small>Преподаватель: {{ grade.subject.teacher.name }}</small>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

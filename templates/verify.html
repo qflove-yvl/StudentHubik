@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Подтверждение{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Введите код подтверждения</h2>
+    <form method="post">
+        <input name="code" placeholder="Код из email / Telegram">
+        <button>Подтвердить</button>
+    </form>
+</div>
+{% endblock %}

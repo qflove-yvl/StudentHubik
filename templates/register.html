@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Регистрация — StudentHubik{% endblock %}
+
+{% block content %}
+<div class="form-wrapper">
+    <div class="form-card">
+        <h2>Регистрация</h2>
+        <form method="post">
+            <input name="name" placeholder="Имя">
+            <input name="email" placeholder="Email">
+            <input type="password" name="password" placeholder="Пароль">
+            <input name="telegram" placeholder="Telegram username">
+            <select name="role">
+                <option value="student">Студент</option>
+                <option value="teacher">Преподаватель</option>
+            </select>
+            <button>Создать аккаунт</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% extends 'base.html' %}
+{% block content %}
+<h2>Регистрация</h2>
+
+<form method="post" class="form">
+    <input name="name" placeholder="Имя" required>
+    <input type="email" name="email" placeholder="Email" required>
+    <input name="telegram" placeholder="Telegram username">
+    <input type="password" name="password" placeholder="Пароль" required>
+    <button type="submit">Создать аккаунт</button>
+</form>
+{% endblock %}
