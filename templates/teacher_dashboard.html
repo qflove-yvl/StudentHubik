@@ -2,28 +2,23 @@
 {% block title %}Кабинет преподавателя{% endblock %}
 
 {% block content %}
-<div class="card">
-    <h2>Кабинет преподавателя</h2>
+<h2 class="page-title">Выставление оценок</h2>
 
-    <form method="post">
-        <select name="student_id">
-            {% for s in students %}
+<form method="post" class="grade-form">
+    <select name="student_id" required>
+        {% for s in students %}
             <option value="{{ s.id }}">{{ s.name }}</option>
-            {% endfor %}
-        </select>
+        {% endfor %}
+    </select>
 
-        <select name="subject_id">
-            {% for sub in subjects %}
+    <select name="subject_id" required>
+        {% for sub in subjects %}
             <option value="{{ sub.id }}">{{ sub.name }}</option>
-            {% endfor %}
-        </select>
+        {% endfor %}
+    </select>
 
-        <input type="number" name="grade" min="1" max="5" placeholder="Оценка">
+    <input type="number" name="value" min="1" max="5" placeholder="Оценка" required>
 
-        <button>Поставить оценку</button>
-    </form>
-
-    <br>
-    <a href="/logout">Выйти</a>
-</div>
+    <button class="btn primary">Сохранить</button>
+</form>
 {% endblock %}

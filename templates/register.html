@@ -14,6 +14,13 @@
                 <option value="student">Студент</option>
                 <option value="teacher">Преподаватель</option>
             </select>
+            <select name="group_id" required>
+    <option value="">Выберите группу</option>
+    {% for group in groups %}
+        <option value="{{ group.id }}">{{ group.name }}</option>
+    {% endfor %}
+</select>
+
             <button>Создать аккаунт</button>
         </form>
     </div>

@@ -2,35 +2,33 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>StudentHubik</title>
+    <title>{% block title %}StudentHubik{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
 
-<div class="app">
+<header class="navbar">
+    <div class="logo">StudentHubik</div>
 
-    <aside class="sidebar">
-        <div class="brand">
-            <h2>StudentHubik</h2>
-            <span>Красноярский колледж отраслевых технологий и предпринимательства</span>
-        </div>
+    <nav>
+        {% if current_user.is_authenticated %}
+            <a href="/dashboard">Кабинет</a>
+            <a href="/logout" class="logout">Выйти</a>
+        {% else %}
+            <a href="/login">Вход</a>
+            <a href="/register" class="primary">Регистрация</a>
+        {% endif %}
+    </nav>
+</header>
 
-        <nav>
-            {% if current_user.is_authenticated %}
-                <a href="/dashboard">📊 Личный кабинет</a>
-                <a href="/logout">🚪 Выйти</a>
-            {% else %}
-                <a href="/login">🔐 Вход</a>
-                <a href="/register">📝 Регистрация</a>
-            {% endif %}
-        </nav>
-    </aside>
+<main class="container">
+    {% block content %}{% endblock %}
+</main>
 
-    <main class="content">
-        {% block content %}{% endblock %}
-    </main>
-
-</div>
+<footer class="footer">
+    StudentHubik © 2026 · ККОТИП
+</footer>
 
 </body>
 </html>

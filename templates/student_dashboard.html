@@ -1,24 +1,18 @@
 {% extends 'base.html' %}
-{% block title %}Мой кабинет{% endblock %}
+{% block title %}Кабинет студента{% endblock %}
 
 {% block content %}
-<div class="card">
-    <h2>Мои оценки</h2>
+<h2 class="page-title">Мои оценки</h2>
 
-    <table width="100%">
-        <tr>
-            <th align="left">Предмет</th>
-            <th align="left">Оценка</th>
-        </tr>
-        {% for g in grades %}
-        <tr>
-            <td>{{ g.subject.name }}</td>
-            <td>{{ g.grade }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-
-    <br>
-    <a href="/logout">Выйти</a>
+<div class="grades">
+    {% for grade in grades %}
+        <div class="grade-card">
+            <div class="subject">{{ grade.subject.name }}</div>
+            <div class="score">{{ grade.value }}</div>
+            <div class="teacher">{{ grade.subject.teacher.name }}</div>
+        </div>
+    {% else %}
+        <p class="muted">Пока оценок нет</p>
+    {% endfor %}
 </div>
 {% endblock %}

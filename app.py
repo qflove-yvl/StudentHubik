@@ -46,6 +46,10 @@ class VerificationCode(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     code = db.Column(db.String(6))
 
+class Group(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+
 
 # ====== МОДЕЛЬ ПРЕДМЕТА ======
 class Subject(db.Model):
@@ -87,6 +91,7 @@ def register():
         password = generate_password_hash(request.form['password'])
         role = request.form['role']
         telegram = request.form.get('telegram')
+        groups = Group.query.all()
 
         user = User(
             name=name,
@@ -98,6 +103,8 @@ def register():
 
         db.session.add(user)
         db.session.commit()
+        group_id = db.Column(db.Integer, db.ForeignKey('group.id'))
+        group = db.relationship('Group')
 
         code = str(random.randint(100000, 999999))
         verify = VerificationCode(user_id=user.id, code=code)
@@ -115,6 +122,7 @@ def register():
         print(f'КОД ПОДТВЕРЖДЕНИЯ ДЛЯ {email}: {code}')
 
         return redirect(url_for('verify', user_id=user.id))
+        return render_template('register.html', groups=groups)
 
     return render_template('register.html')
 
@@ -152,9 +160,14 @@ def login():
 @login_required
 def dashboard():
     if current_user.role == 'student':
-        return redirect(url_for('student_dashboard'))
-    elif current_user.role == 'teacher':
-        return redirect(url_for('teacher_dashboard'))
+        grades = Grade.query.filter_by(student_id=current_user.id).all()
+        return render_template('student_dashboard.html', grades=grades)
+
+    if current_user.role == 'teacher':
+        return redirect('/teacher')
+
+    return redirect('/')
+
 
 
 
@@ -174,34 +187,26 @@ def student_dashboard():
 @app.route('/teacher', methods=['GET', 'POST'])
 @login_required
 def teacher_dashboard():
-    subjects = Subject.query.filter_by(teacher_id=current_user.id).all()
+    if current_user.role != 'teacher':
+        return redirect('/dashboard')
+
     students = User.query.filter_by(role='student').all()
+    subjects = Subject.query.filter_by(teacher_id=current_user.id).all()
 
     if request.method == 'POST':
-        if (
-                'student_id' in request.form and
-                'subject_id' in request.form and
-                'grade' in request.form
-        ):
-            student_id = request.form.get('student_id')
-            subject_id = request.form.get('subject_id')
-            value = request.form.get('grade')
-
-            if student_id and subject_id and value:
-                grade = Grade(
-                    student_id=int(student_id),
-                    subject_id=int(subject_id),
-                    grade=int(value)
-                )
-                db.session.add(grade)
-                db.session.commit()
+        grade = Grade(
+            student_id=request.form['student_id'],
+            subject_id=request.form['subject_id'],
+            value=request.form['value']
+        )
+        db.session.add(grade)
+        db.session.commit()
 
     return render_template(
         'teacher_dashboard.html',
-        subjects=subjects,
-        students=students
+        students=students,
+        subjects=subjects
     )
-
 
 if __name__ == '__main__':
     app.run(debug=True)
