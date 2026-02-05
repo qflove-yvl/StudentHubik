@@ -1,38 +1,11 @@
-{% extends 'base.html' %}
-{% block title %}StudentHubik{% endblock %}
-
+{% extends "base.html" %}
 {% block content %}
-<div class="hero">
+<section class="hero">
     <h1>StudentHubik</h1>
-    <p class="subtitle">
-        Электронный сервис ККОТИП для просмотра текущих оценок,
-        предметов и успеваемости
-    </p>
-
-    {% if not current_user.is_authenticated %}
-        <div class="hero-buttons">
-            <a href="/login" class="btn primary">Войти</a>
-            <a href="/register" class="btn">Регистрация</a>
-        </div>
-    {% else %}
-        <a href="/dashboard" class="btn primary">Перейти в кабинет</a>
-    {% endif %}
-</div>
-
-<div class="features">
-    <div class="card">
-        <h3>📊 Оценки</h3>
-        <p>Актуальные оценки по всем предметам в одном месте</p>
+    <p>Современный электронный дневник для колледжа ККОТИП</p>
+    <div class="hero-buttons">
+        <a href="/login" class="btn primary">Войти</a>
+        <a href="/register" class="btn ghost">Регистрация</a>
     </div>
-
-    <div class="card">
-        <h3>👨‍🏫 Преподаватели</h3>
-        <p>Преподаватели выставляют оценки напрямую</p>
-    </div>
-
-    <div class="card">
-        <h3>🔐 Безопасность</h3>
-        <p>Подтверждение через Telegram, личные кабинеты</p>
-    </div>
-</div>
+</section>
 {% endblock %}

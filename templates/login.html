@@ -1,15 +1,11 @@
-{% extends 'base.html' %}
-{% block title %}Вход — StudentHubik{% endblock %}
-
+{% extends "base.html" %}
 {% block content %}
-<div class="form-wrapper">
-    <div class="form-card">
-        <h2>Вход в StudentHubik</h2>
-        <form method="post">
-            <input name="email" placeholder="Email">
-            <input type="password" name="password" placeholder="Пароль">
-            <button>Войти</button>
-        </form>
-    </div>
+<div class="auth-card">
+    <h2>Вход</h2>
+    <form method="post">
+        <input type="email" name="email" placeholder="Email" required>
+        <input type="password" name="password" placeholder="Пароль" required>
+        <button class="btn primary" type="submit">Войти</button>
+    </form>
 </div>
 {% endblock %}

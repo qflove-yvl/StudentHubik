@@ -1,40 +1,21 @@
-{% extends 'base.html' %}
-{% block title %}Регистрация — StudentHubik{% endblock %}
-
+{% extends "base.html" %}
 {% block content %}
-<div class="form-wrapper">
-    <div class="form-card">
-        <h2>Регистрация</h2>
-        <form method="post">
-            <input name="name" placeholder="Имя">
-            <input name="email" placeholder="Email">
-            <input type="password" name="password" placeholder="Пароль">
-            <input name="telegram" placeholder="Telegram username">
-            <select name="role">
-                <option value="student">Студент</option>
-                <option value="teacher">Преподаватель</option>
-            </select>
-            <select name="group_id" required>
+<div class="auth-card">
+    <h2>Регистрация</h2>
+    <form method="post">
+        <input type="text" name="name" placeholder="ФИО" required>
+        <input type="email" name="email" placeholder="Email" required>
+
+        <select name="group_id" required>
     <option value="">Выберите группу</option>
-    {% for group in groups %}
-        <option value="{{ group.id }}">{{ group.name }}</option>
-    {% endfor %}
+    <option value="1">ИС24-01/2g</option>
+    <option value="2">ИС24-01/2</option>
+    <option value="3">ИС24-01</option>
 </select>
 
-            <button>Создать аккаунт</button>
-        </form>
-    </div>
-</div>
-{% endblock %}
-{% extends 'base.html' %}
-{% block content %}
-<h2>Регистрация</h2>
+        <input type="password" name="password" placeholder="Пароль" required>
 
-<form method="post" class="form">
-    <input name="name" placeholder="Имя" required>
-    <input type="email" name="email" placeholder="Email" required>
-    <input name="telegram" placeholder="Telegram username">
-    <input type="password" name="password" placeholder="Пароль" required>
-    <button type="submit">Создать аккаунт</button>
-</form>
+        <button class="btn primary" type="submit">Создать аккаунт</button>
+    </form>
+</div>
 {% endblock %}

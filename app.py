@@ -37,6 +37,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
     role = db.Column(db.String(20), nullable=False)
+    group_id = db.Column(db.Integer)
 
     is_verified = db.Column(db.Boolean, default=False)
     telegram = db.Column(db.String(100))
@@ -85,44 +86,24 @@ def index():
 # ====== РЕГИСТРАЦИЯ ======
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    groups = Group.query.all()
+
     if request.method == 'POST':
         name = request.form['name']
         email = request.form['email']
-        password = generate_password_hash(request.form['password'])
-        role = request.form['role']
-        telegram = request.form.get('telegram')
-        groups = Group.query.all()
+        password = request.form['password']
+        group_id = request.form['group_id']
 
         user = User(
             name=name,
             email=email,
-            password=password,
-            role=role,
-            telegram=telegram
+            password=generate_password_hash(password),
+            role='student',
+            group_id = request.form['group_id']
         )
-
         db.session.add(user)
         db.session.commit()
-        group_id = db.Column(db.Integer, db.ForeignKey('group.id'))
-        group = db.relationship('Group')
-
-        code = str(random.randint(100000, 999999))
-        verify = VerificationCode(user_id=user.id, code=code)
-        db.session.add(verify)
-        db.session.commit()
-        if telegram:
-            try:
-                bot.send_message(
-                    chat_id=f"@{telegram}",
-                    text=f"Ваш код подтверждения: {code}"
-                )
-            except:
-                print("Не удалось отправить сообщение в Telegram")
-
-        print(f'КОД ПОДТВЕРЖДЕНИЯ ДЛЯ {email}: {code}')
-
-        return redirect(url_for('verify', user_id=user.id))
-        return render_template('register.html', groups=groups)
+        return redirect('/login')
 
     return render_template('register.html')
 
