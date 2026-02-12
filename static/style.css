@@ -159,3 +159,68 @@ select option {
     color: #000;
     background: #fff;
 }
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.logo-icon {
+    font-size: 26px;
+    background: linear-gradient(135deg, #7c3aed, #22d3ee);
+    padding: 6px;
+    border-radius: 10px;
+}
+
+.logo-text {
+    display: flex;
+}
+
+.logo-text .accent {
+    color: #7c3aed;
+}
+.role-selection {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-top: 60px;
+}
+
+.role-card {
+    background: #111827;
+    padding: 40px;
+    border-radius: 20px;
+    text-decoration: none;
+    color: white;
+    width: 280px;
+    transition: 0.3s ease;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+.role-card:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 15px 40px rgba(124,58,237,0.3);
+}
+.flash-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+}
+
+.flash-message {
+    background: #7c3aed;
+    padding: 12px 20px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    animation: fadeIn 0.3s ease;
+}
+.logo {
+    height: 60px;
+    transition: 0.4s ease;
+}
+
+.logo:hover {
+    transform: scale(1.05);
+}

@@ -1,3 +1,4 @@
+from flask import flash
 from flask import Flask, render_template, redirect, url_for, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -90,10 +91,18 @@ def register():
 
     if request.method == 'POST':
         name = request.form['name']
-        email = request.form['email']
+        email = request.form.get('email')
         password = request.form['password']
         group_id = request.form['group_id']
+        is_approved = db.Column(db.Boolean, default=False)
+        if not email or not password or not name:
+            flash("Заполните все поля")
+            return redirect(url_for('register'))
 
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            flash("Аккаунт с такой почтой уже существует")
+            return redirect(url_for('register'))
         user = User(
             name=name,
             email=email,
@@ -132,7 +141,9 @@ def login():
             return redirect(url_for('dashboard'))
         elif not user.is_verified:
             return "Аккаунт не подтверждён"
-
+        if user.role == 'teacher' and not user.is_approved:
+            flash("Ваш аккаунт ожидает подтверждения администратора")
+            return redirect(url_for('login'))
     return render_template('login.html')
 
 

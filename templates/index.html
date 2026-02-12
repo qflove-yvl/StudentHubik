@@ -1,11 +1,89 @@
-{% extends "base.html" %}
-{% block content %}
-<section class="hero">
-    <h1>StudentHubik</h1>
-    <p>Современный электронный дневник для колледжа ККОТИП</p>
-    <div class="hero-buttons">
-        <a href="/login" class="btn primary">Войти</a>
-        <a href="/register" class="btn ghost">Регистрация</a>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>StudentHub</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+<style>
+body {
+    margin:0;
+    font-family:'Inter', sans-serif;
+    background:linear-gradient(135deg,#6366f1,#8b5cf6);
+    height:100vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+
+.container {
+    background:rgba(255,255,255,0.15);
+    backdrop-filter:blur(20px);
+    padding:60px;
+    border-radius:30px;
+    text-align:center;
+    color:white;
+    box-shadow:0 20px 60px rgba(0,0,0,0.2);
+    animation:fadeIn 0.8s ease;
+}
+
+h1 {
+    font-size:36px;
+    margin-bottom:10px;
+}
+
+.subtitle {
+    opacity:0.9;
+    margin-bottom:40px;
+}
+
+.buttons {
+    display:flex;
+    gap:25px;
+    justify-content:center;
+}
+
+.btn {
+    padding:18px 40px;
+    border:none;
+    border-radius:15px;
+    font-size:18px;
+    font-weight:600;
+    cursor:pointer;
+    transition:0.3s;
+    background:white;
+    color:#6366f1;
+}
+
+.btn:hover {
+    transform:translateY(-5px);
+    box-shadow:0 15px 30px rgba(0,0,0,0.3);
+}
+
+@keyframes fadeIn {
+    from {opacity:0; transform:translateY(20px);}
+    to {opacity:1; transform:translateY(0);}
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+    <img src="{{ url_for('static', filename='logo.svg') }}" width="200">
+
+    <h1>Добро пожаловать в StudentHub</h1>
+    <div class="subtitle">Платформа для удобной работы студентов и преподавателей</div>
+
+    <div class="buttons">
+        <a href="{{ url_for('login') }}?role=student">
+            <button class="btn">Я студент</button>
+        </a>
+        <a href="{{ url_for('login') }}?role=teacher">
+            <button class="btn">Я преподаватель</button>
+        </a>
     </div>
-</section>
-{% endblock %}
+</div>
+
+</body>
+</html>

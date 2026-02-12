@@ -7,10 +7,24 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div class="flash-container">
+      {% for message in messages %}
+        <div class="flash-message">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
 <div class="bg"></div>
 
 <header class="navbar">
+    <div class="logo">
+    <div class="logo-icon">🎓</div>
+    <div class="logo-text">
+        <span>Student</span><span class="accent">Hubik</span>
+    </div>
+</div>
     <div class="logo">StudentHubik</div>
     <nav>
         <a href="/">Главная</a>
@@ -18,7 +32,7 @@
         <a href="/register">Регистрация</a>
     </nav>
 </header>
-
+<img src="{{ url_for('static', filename='logo.svg') }}" class="logo">
 <main class="content">
     {% block content %}{% endblock %}
 </main>

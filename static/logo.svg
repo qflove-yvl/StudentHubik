@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="220" height="60" viewBox="0 0 220 60"
+     xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5DA9FF">
+        <animate attributeName="stop-color"
+                 values="#5DA9FF;#7C5CFF;#5DA9FF"
+                 dur="6s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" stop-color="#2E5BFF">
+        <animate attributeName="stop-color"
+                 values="#2E5BFF;#5C7CFF;#2E5BFF"
+                 dur="6s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- ICON -->
+  <g transform="translate(5 5)">
+    <rect width="50" height="50" rx="14" fill="url(#g)" filter="url(#glow)">
+      <animateTransform
+        attributeName="transform"
+        type="rotate"
+        from="0 25 25"
+        to="360 25 25"
+        dur="40s"
+        repeatCount="indefinite"/>
+    </rect>
+
+    <text x="25" y="33"
+          text-anchor="middle"
+          font-size="20"
+          font-weight="700"
+          fill="white"
+          font-family="Inter, Arial, sans-serif">
+      SH
+    </text>
+  </g>
+
+  <!-- TEXT -->
+  <text x="65" y="38"
+        font-size="23"
+        font-weight="700"
+        fill="#EDEDED"
+        font-family="Inter, Arial, sans-serif">
+    Student
+    <tspan fill="#EDEDED">Hubik</tspan>
+  </text>
+</svg>

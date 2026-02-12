@@ -1,24 +1,90 @@
-{% extends 'base.html' %}
-{% block title %}Кабинет преподавателя{% endblock %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Кабинет преподавателя</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 
-{% block content %}
-<h2 class="page-title">Выставление оценок</h2>
+<style>
+body {
+    margin:0;
+    font-family:'Inter', sans-serif;
+    background:linear-gradient(135deg,#6366f1,#8b5cf6);
+}
 
-<form method="post" class="grade-form">
-    <select name="student_id" required>
-        {% for s in students %}
-            <option value="{{ s.id }}">{{ s.name }}</option>
-        {% endfor %}
-    </select>
+.header {
+    padding:25px 50px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    color:white;
+}
 
-    <select name="subject_id" required>
-        {% for sub in subjects %}
-            <option value="{{ sub.id }}">{{ sub.name }}</option>
-        {% endfor %}
-    </select>
+.content {
+    padding:40px 50px;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+    gap:30px;
+}
 
-    <input type="number" name="value" min="1" max="5" placeholder="Оценка" required>
+.card {
+    background:rgba(255,255,255,0.15);
+    backdrop-filter:blur(20px);
+    padding:30px;
+    border-radius:25px;
+    color:white;
+    transition:0.3s;
+    box-shadow:0 15px 40px rgba(0,0,0,0.2);
+}
 
-    <button class="btn primary">Сохранить</button>
-</form>
-{% endblock %}
+.card:hover {
+    transform:translateY(-6px);
+}
+
+.title {
+    font-size:22px;
+    font-weight:600;
+    margin-bottom:15px;
+}
+
+.big {
+    font-size:36px;
+    font-weight:800;
+}
+
+.logout {
+    color:white;
+    text-decoration:none;
+    font-weight:600;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+    <h2>Преподаватель: {{ current_user.name }}</h2>
+    <a class="logout" href="{{ url_for('logout') }}">Выйти</a>
+</div>
+
+<div class="content">
+
+    <div class="card">
+        <div class="title">Мои группы</div>
+        <div class="big">3</div>
+    </div>
+
+    <div class="card">
+        <div class="title">Активные задания</div>
+        <div class="big">5</div>
+    </div>
+
+    <div class="card">
+        <div class="title">Студентов</div>
+        <div class="big">28</div>
+    </div>
+
+</div>
+
+</body>
+</html>
