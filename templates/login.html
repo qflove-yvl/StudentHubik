@@ -1,11 +1,28 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="auth-card">
-    <h2>Вход</h2>
-    <form method="post">
-        <input type="email" name="email" placeholder="Email" required>
-        <input type="password" name="password" placeholder="Пароль" required>
-        <button class="btn primary" type="submit">Войти</button>
-    </form>
+
+<div class="auth-wrapper">
+    <div class="auth-card">
+
+        <div class="auth-header">
+            <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo">
+            <h1>StudentHubik</h1>
+            <p>Вход в систему</p>
+        </div>
+
+        <form method="POST">
+            <input type="email" name="email" class="input-field" placeholder="Email" required>
+            <input type="password" name="password" class="input-field" placeholder="Пароль" required>
+
+            <button type="submit" class="btn auth-btn">Войти</button>
+        </form>
+
+        <div class="auth-footer">
+            <span>Нет аккаунта?</span>
+            <a href="{{ url_for('register') }}">Регистрация</a>
+        </div>
+
+    </div>
 </div>
+
 {% endblock %}

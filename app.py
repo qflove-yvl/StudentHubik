@@ -132,20 +132,26 @@ def verify(user_id):
     return render_template('verify.html')
 
 # ====== ВХОД ======
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        user = User.query.filter_by(email=request.form['email']).first()
-        if user and check_password_hash(user.password, request.form['password']):
-            login_user(user)
-            return redirect(url_for('dashboard'))
-        elif not user.is_verified:
-            return "Аккаунт не подтверждён"
-        if user.role == 'teacher' and not user.is_approved:
-            flash("Ваш аккаунт ожидает подтверждения администратора")
-            return redirect(url_for('login'))
-    return render_template('login.html')
+        email = request.form.get('email')
+        password = request.form.get('password')
 
+        user = User.query.filter_by(email=email).first()
+
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+
+            if user.role == 'teacher':
+                return redirect(url_for('teacher_dashboard'))
+            return redirect(url_for('student_dashboard'))
+
+        flash("Неверный email или пароль")
+
+    return render_template("login.html")
 
 # ====== КАБИНЕТ ======
 @app.route('/dashboard')
@@ -189,7 +195,7 @@ def teacher_dashboard():
         grade = Grade(
             student_id=request.form['student_id'],
             subject_id=request.form['subject_id'],
-            value=request.form['value']
+            grade=request.form['value']  # <-- исправлено
         )
         db.session.add(grade)
         db.session.commit()

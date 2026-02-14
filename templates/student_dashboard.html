@@ -1,81 +1,25 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<title>Кабинет студента</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+{% extends "base.html" %}
+{% block content %}
 
-<style>
-body {
-    margin:0;
-    font-family:'Inter', sans-serif;
-    background:linear-gradient(135deg,#f3f4f6,#e5e7eb);
-}
+<h1 class="page-title">Кабинет студента</h1>
 
-.header {
-    background:white;
-    padding:20px 40px;
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    box-shadow:0 5px 15px rgba(0,0,0,0.05);
-}
+<div class="card-grid">
 
-.cards {
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
-    gap:30px;
-    padding:40px;
-}
+    <div class="card">
+        <div class="card-title">Группа</div>
+        <div class="card-value">{{ current_user.group_id }}</div>
+    </div>
 
-.card {
-    background:white;
-    padding:30px;
-    border-radius:20px;
-    box-shadow:0 10px 30px rgba(0,0,0,0.08);
-    transition:0.3s;
-}
+    <div class="card">
+        <div class="card-title">Средний балл</div>
+        <div class="card-value">4.8</div>
+    </div>
 
-.card:hover {
-    transform:translateY(-5px);
-}
+    <div class="card">
+        <div class="card-title">Предметы</div>
+        <div class="card-value">6</div>
+    </div>
 
-.title {
-    font-size:20px;
-    font-weight:600;
-    margin-bottom:15px;
-}
-
-.value {
-    font-size:32px;
-    font-weight:800;
-    color:#6366f1;
-}
-</style>
-</head>
-<body>
-
-<div class="header">
-    <h2>Привет, {{ current_user.name }}</h2>
-    <a href="{{ url_for('logout') }}">Выйти</a>
 </div>
 
-<div class="cards">
-    <div class="card">
-        <div class="title">Моя группа</div>
-        <div class="value">{{ current_user.group.name if current_user.group else "Не выбрана" }}</div>
-    </div>
-
-    <div class="card">
-        <div class="title">Задания</div>
-        <div class="value">0</div>
-    </div>
-
-    <div class="card">
-        <div class="title">Оценки</div>
-        <div class="value">—</div>
-    </div>
-</div>
-
-</body>
-</html>
+{% endblock %}

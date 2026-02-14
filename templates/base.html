@@ -1,41 +1,46 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <title>StudentHubik</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<meta charset="UTF-8">
+<title>StudentHubik</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-{% with messages = get_flashed_messages() %}
-  {% if messages %}
-    <div class="flash-container">
-      {% for message in messages %}
-        <div class="flash-message">{{ message }}</div>
-      {% endfor %}
-    </div>
-  {% endif %}
-{% endwith %}
-<div class="bg"></div>
 
-<header class="navbar">
-    <div class="logo">
-    <div class="logo-icon">🎓</div>
-    <div class="logo-text">
-        <span>Student</span><span class="accent">Hubik</span>
+<div class="topbar">
+    <div class="top-left">
+        <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo">
+        <span class="brand-name">StudentHubik</span>
     </div>
+
+    {% if current_user.is_authenticated %}
+    <div class="top-right">
+        <div class="user-avatar">
+            {{ current_user.username[0]|upper }}
+        </div>
+        <span class="username">{{ current_user.name[0]|upper }}</span>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Выйти</a>
+    </div>
+    {% endif %}
 </div>
-    <div class="logo">StudentHubik</div>
-    <nav>
-        <a href="/">Главная</a>
-        <a href="/login">Вход</a>
-        <a href="/register">Регистрация</a>
-    </nav>
-</header>
-<img src="{{ url_for('static', filename='logo.svg') }}" class="logo">
-<main class="content">
-    {% block content %}{% endblock %}
-</main>
+
+<div class="app-container">
+
+    {% if current_user.is_authenticated %}
+    <aside class="sidebar">
+        <a href="{{ url_for('dashboard') }}" class="nav-link">Панель</a>
+        <a href="{{ url_for('student_dashboard') }}" class="nav-link">Студент</a>
+        <a href="{{ url_for('teacher_dashboard') }}" class="nav-link">Преподаватель</a>
+    </aside>
+    {% endif %}
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+</div>
 
 </body>
 </html>

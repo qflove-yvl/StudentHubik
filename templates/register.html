@@ -1,21 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="auth-card">
-    <h2>Регистрация</h2>
-    <form method="post">
-        <input type="text" name="name" placeholder="ФИО" required>
-        <input type="email" name="email" placeholder="Email" required>
 
-        <select name="group_id" required>
-    <option value="">Выберите группу</option>
-    <option value="1">ИС24-01/2g</option>
-    <option value="2">ИС24-01/2</option>
-    <option value="3">ИС24-01</option>
-</select>
+<div style="max-width:500px;margin:auto;margin-top:100px;">
+    <h1 class="page-title">Создать аккаунт</h1>
 
-        <input type="password" name="password" placeholder="Пароль" required>
+    <form method="POST">
+        {{ form.hidden_tag() }}
 
-        <button class="btn primary" type="submit">Создать аккаунт</button>
+        {{ form.username(class="input-field", placeholder="Имя") }}
+        {{ form.email(class="input-field", placeholder="Email") }}
+        {{ form.password(class="input-field", placeholder="Пароль") }}
+        {{ form.confirm_password(class="input-field", placeholder="Подтвердите пароль") }}
+
+        <button type="submit" class="btn" style="width:100%;">Зарегистрироваться</button>
     </form>
+
+    <p style="margin-top:20px;text-align:center;">
+        Уже есть аккаунт?
+        <a href="{{ url_for('login') }}" style="color:#c084fc;">Войти</a>
+    </p>
 </div>
+
 {% endblock %}

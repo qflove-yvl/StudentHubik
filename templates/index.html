@@ -1,89 +1,29 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<title>StudentHub</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+{% extends "base.html" %}
+{% block content %}
 
-<style>
-body {
-    margin:0;
-    font-family:'Inter', sans-serif;
-    background:linear-gradient(135deg,#6366f1,#8b5cf6);
-    height:100vh;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-}
+<div style="max-width:900px;margin:auto;text-align:center;margin-top:80px;">
 
-.container {
-    background:rgba(255,255,255,0.15);
-    backdrop-filter:blur(20px);
-    padding:60px;
-    border-radius:30px;
-    text-align:center;
-    color:white;
-    box-shadow:0 20px 60px rgba(0,0,0,0.2);
-    animation:fadeIn 0.8s ease;
-}
+    <h1 class="page-title">Добро пожаловать в StudentHubik</h1>
+    <p style="opacity:0.7;margin-bottom:50px;font-size:18px;">
+        Платформа управления обучением нового поколения
+    </p>
 
-h1 {
-    font-size:36px;
-    margin-bottom:10px;
-}
+    <div class="card-grid">
+        <div class="card">
+            <div class="card-title">Я студент</div>
+            <div class="card-value">🎓</div>
+            <br>
+            <a href="{{ url_for('login') }}?role=student" class="btn">Войти как студент</a>
+        </div>
 
-.subtitle {
-    opacity:0.9;
-    margin-bottom:40px;
-}
-
-.buttons {
-    display:flex;
-    gap:25px;
-    justify-content:center;
-}
-
-.btn {
-    padding:18px 40px;
-    border:none;
-    border-radius:15px;
-    font-size:18px;
-    font-weight:600;
-    cursor:pointer;
-    transition:0.3s;
-    background:white;
-    color:#6366f1;
-}
-
-.btn:hover {
-    transform:translateY(-5px);
-    box-shadow:0 15px 30px rgba(0,0,0,0.3);
-}
-
-@keyframes fadeIn {
-    from {opacity:0; transform:translateY(20px);}
-    to {opacity:1; transform:translateY(0);}
-}
-</style>
-</head>
-
-<body>
-
-<div class="container">
-    <img src="{{ url_for('static', filename='logo.svg') }}" width="200">
-
-    <h1>Добро пожаловать в StudentHub</h1>
-    <div class="subtitle">Платформа для удобной работы студентов и преподавателей</div>
-
-    <div class="buttons">
-        <a href="{{ url_for('login') }}?role=student">
-            <button class="btn">Я студент</button>
-        </a>
-        <a href="{{ url_for('login') }}?role=teacher">
-            <button class="btn">Я преподаватель</button>
-        </a>
+        <div class="card">
+            <div class="card-title">Я преподаватель</div>
+            <div class="card-value">👨‍🏫</div>
+            <br>
+            <a href="{{ url_for('login') }}?role=teacher" class="btn">Войти как преподаватель</a>
+        </div>
     </div>
+
 </div>
 
-</body>
-</html>
+{% endblock %}
