@@ -90,68 +90,67 @@ def register():
     groups = Group.query.all()
 
     if request.method == 'POST':
-        name = request.form['name']
+        name = request.form.get('name')
         email = request.form.get('email')
-        password = request.form['password']
-        group_id = request.form['group_id']
-        is_approved = db.Column(db.Boolean, default=False)
-        if not email or not password or not name:
+        password = request.form.get('password')
+        role = request.form.get('role')
+        group_id = request.form.get('group_id')
+
+        if not name or not email or not password or not role:
             flash("Заполните все поля")
             return redirect(url_for('register'))
 
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            flash("Аккаунт с такой почтой уже существует")
+        if User.query.filter_by(email=email).first():
+            flash("Пользователь уже существует")
             return redirect(url_for('register'))
-        user = User(
+
+        new_user = User(
             name=name,
             email=email,
             password=generate_password_hash(password),
-            role='student',
-            group_id = request.form['group_id']
+            role=role,
+            group_id=group_id if role == 'student' else None
         )
-        db.session.add(user)
+
+        db.session.add(new_user)
         db.session.commit()
-        return redirect('/login')
 
-    return render_template('register.html')
+        flash("Регистрация успешна")
+        return redirect(url_for('login', role=role))
 
-@app.route('/verify/<int:user_id>', methods=['GET', 'POST'])
-def verify(user_id):
-    if request.method == 'POST':
-        code = request.form['code']
-        record = VerificationCode.query.filter_by(user_id=user_id, code=code).first()
-
-        if record:
-            user = User.query.get(user_id)
-            user.is_verified = True
-            db.session.delete(record)
-            db.session.commit()
-            return redirect(url_for('login'))
-
-    return render_template('verify.html')
+    return render_template('register.html', groups=groups)
 
 # ====== ВХОД ======
 
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    role = request.args.get('role')
+
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
+        selected_role = request.form.get('role')
 
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password):
+
+            # 🔥 ПРОВЕРКА РОЛИ
+            if user.role != selected_role:
+                flash("Вы пытаетесь войти не в ту роль")
+                return redirect(url_for('login', role=selected_role))
+
             login_user(user)
 
             if user.role == 'teacher':
                 return redirect(url_for('teacher_dashboard'))
-            return redirect(url_for('student_dashboard'))
+            else:
+                return redirect(url_for('student_dashboard'))
 
         flash("Неверный email или пароль")
 
-    return render_template("login.html")
+    return render_template("login.html", role=role)
 
 # ====== КАБИНЕТ ======
 @app.route('/dashboard')
