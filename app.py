@@ -6,7 +6,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import random
 from telegram import Bot
 import os
-
+from flask import render_template, request, redirect, url_for, flash
+from werkzeug.security import generate_password_hash
+from sqlalchemy.exc import IntegrityError
 
 TELEGRAM_TOKEN = "8356757725:AAHzphHvJ_mBGhSZYN8KrIL6RQ5axoatn7o"
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -32,16 +34,14 @@ login_manager.login_view = 'login'
 
 
 # ====== МОДЕЛЬ ПОЛЬЗОВАТЕЛЯ ======
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
+    name = db.Column(db.String(150), nullable=False)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False)
-    group_id = db.Column(db.Integer)
-
-    is_verified = db.Column(db.Boolean, default=False)
-    telegram = db.Column(db.String(100))
+    group_id = db.Column(db.Integer, db.ForeignKey('group.id'))
 
 class VerificationCode(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -50,7 +50,7 @@ class VerificationCode(db.Model):
 
 class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), unique=True, nullable=False)
+    name = db.Column(db.String(100), unique=True, nullable=False)
 
 
 # ====== МОДЕЛЬ ПРЕДМЕТА ======
@@ -66,16 +66,14 @@ class Subject(db.Model):
 class Grade(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'))
-    grade = db.Column(db.Integer)
-
-    student = db.relationship('User', foreign_keys=[student_id])
-    subject = db.relationship('Subject')
+    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    subject = db.Column(db.String(100))
+    value = db.Column(db.Integer)
 
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 
 # ====== ГЛАВНАЯ СТРАНИЦА ======
@@ -87,39 +85,75 @@ def index():
 # ====== РЕГИСТРАЦИЯ ======
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    groups = Group.query.all()
-
     if request.method == 'POST':
-        name = request.form.get('name')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        role = request.form.get('role')
-        group_id = request.form.get('group_id')
+        try:
+            role = request.form.get('role')
+            email = request.form.get('email').strip().lower()
+            password = request.form.get('password')
 
-        if not name or not email or not password or not role:
-            flash("Заполните все поля")
+            if len(password) < 6:
+                flash("Пароль должен быть минимум 6 символов")
+                return redirect(url_for('register'))
+
+            if User.query.filter_by(email=email).first():
+                flash("Пользователь с таким email уже существует")
+                return redirect(url_for('register'))
+
+            hashed_password = generate_password_hash(password)
+
+            if role == 'student':
+                name = request.form.get('name').strip()
+                group_name = request.form.get('group_name').strip()
+
+                if not name or not group_name:
+                    flash("Заполните все поля")
+                    return redirect(url_for('register'))
+
+                group = Group.query.filter_by(name=group_name).first()
+
+                if not group:
+                    group = Group(name=group_name)
+                    db.session.add(group)
+                    db.session.commit()
+
+                new_user = User(
+                    name=name,
+                    email=email,
+                    password=hashed_password,
+                    role='student',
+                    group_id=group.id
+                )
+
+            elif role == 'teacher':
+                surname = request.form.get('surname').strip()
+                firstname = request.form.get('firstname').strip()
+                patronymic = request.form.get('patronymic').strip()
+
+                if not surname or not firstname:
+                    flash("Введите ФИО полностью")
+                    return redirect(url_for('register'))
+
+                full_name = f"{surname} {firstname} {patronymic}"
+
+                new_user = User(
+                    name=full_name,
+                    email=email,
+                    password=hashed_password,
+                    role='teacher'
+                )
+
+            db.session.add(new_user)
+            db.session.commit()
+
+            flash("Регистрация успешна!")
+            return redirect(url_for('login'))
+
+        except IntegrityError:
+            db.session.rollback()
+            flash("Ошибка базы данных")
             return redirect(url_for('register'))
 
-        if User.query.filter_by(email=email).first():
-            flash("Пользователь уже существует")
-            return redirect(url_for('register'))
-
-        new_user = User(
-            name=name,
-            email=email,
-            password=generate_password_hash(password),
-            role=role,
-            group_id=group_id if role == 'student' else None
-        )
-
-        db.session.add(new_user)
-        db.session.commit()
-
-        flash("Регистрация успешна")
-        return redirect(url_for('login', role=role))
-
-    return render_template('register.html', groups=groups)
-
+    return render_template('register.html')
 # ====== ВХОД ======
 
 
@@ -130,17 +164,10 @@ def login():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
-        selected_role = request.form.get('role')
 
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password):
-
-            # 🔥 ПРОВЕРКА РОЛИ
-            if user.role != selected_role:
-                flash("Вы пытаетесь войти не в ту роль")
-                return redirect(url_for('login', role=selected_role))
-
             login_user(user)
 
             if user.role == 'teacher':
@@ -174,6 +201,35 @@ def dashboard():
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
+@app.route('/add_grade', methods=['POST'])
+def add_grade():
+    try:
+        student_id = request.form.get('student_id')
+        subject = request.form.get('subject')
+        value = int(request.form.get('value'))
+
+        if value < 2 or value > 5:
+            flash("Оценка должна быть от 2 до 5")
+            return redirect(url_for('teacher_dashboard'))
+
+        grade = Grade(
+            student_id=student_id,
+            teacher_id=current_user.id,
+            subject=subject,
+            value=value
+        )
+
+        db.session.add(grade)
+        db.session.commit()
+
+        flash("Оценка добавлена")
+        return redirect(url_for('teacher_dashboard'))
+
+    except Exception:
+        db.session.rollback()
+        flash("Ошибка при выставлении оценки")
+        return redirect(url_for('teacher_dashboard'))
 
 @app.route('/student')
 @login_required

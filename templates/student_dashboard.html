@@ -1,24 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h1 class="page-title">Кабинет студента</h1>
+<div class="dashboard">
+    <h2>Ваши оценки</h2>
 
-<div class="card-grid">
-
-    <div class="card">
-        <div class="card-title">Группа</div>
-        <div class="card-value">{{ current_user.group_id }}</div>
-    </div>
-
-    <div class="card">
-        <div class="card-title">Средний балл</div>
-        <div class="card-value">4.8</div>
-    </div>
-
-    <div class="card">
-        <div class="card-title">Предметы</div>
-        <div class="card-value">6</div>
-    </div>
+    {% for grade in grades %}
+        <div class="panel">
+            <strong>{{ grade.subject.name }}</strong>
+            <div style="margin-top:10px;color:var(--muted);">
+                Оценка: {{ grade.grade }}
+            </div>
+        </div>
+    {% endfor %}
 
 </div>
 

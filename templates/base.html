@@ -1,39 +1,138 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 
 <style>
+
+/* ===== ROOT ===== */
+:root {
+    --bg: #0b0f19;
+    --card: rgba(255,255,255,0.05);
+    --border: rgba(255,255,255,0.08);
+    --accent: #7c3aed;
+    --accent2: #06b6d4;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+}
+
 body {
     margin: 0;
+    background: radial-gradient(circle at 20% 20%, #1e1b4b, #0b0f19 60%);
+    color: var(--text);
     font-family: 'Inter', sans-serif;
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    color: white;
 }
 
-.glass {
-    background: rgba(255,255,255,0.05);
-    backdrop-filter: blur(15px);
-    border-radius: 20px;
-    padding: 30px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+/* ===== NAVBAR ===== */
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 25px 60px;
+    backdrop-filter: blur(12px);
+    background: rgba(10,15,30,0.6);
+    border-bottom: 1px solid var(--border);
 }
 
-.btn-modern {
-    padding: 12px 25px;
-    border-radius: 12px;
+.logo {
+    font-family: 'Clash Display', sans-serif;
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: -1px;
+}
+
+.logo span {
+    background: linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* ===== HERO ===== */
+.hero {
+    text-align: center;
+    padding: 140px 20px 80px;
+}
+
+.hero h1 {
+    font-family: 'Clash Display', sans-serif;
+    font-size: 60px;
+    font-weight: 700;
+    letter-spacing: -2px;
+}
+
+.hero p {
+    color: var(--muted);
+    margin-top: 20px;
+    font-size: 18px;
+}
+
+/* ===== CARDS ===== */
+.cards {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-top: 60px;
+}
+
+.card {
+    width: 340px;
+    padding: 50px;
+    border-radius: 30px;
+    background: var(--card);
+    backdrop-filter: blur(30px);
+    border: 1px solid var(--border);
+    transition: 0.4s;
+    text-align: center;
+}
+
+.card:hover {
+    transform: translateY(-12px);
+    box-shadow: 0 30px 60px rgba(124,58,237,0.25);
+}
+
+/* ===== BUTTON ===== */
+.btn {
+    margin-top: 35px;
+    padding: 15px 30px;
+    border-radius: 18px;
     border: none;
     font-weight: 600;
+    font-size: 15px;
     cursor: pointer;
-    background: linear-gradient(90deg,#6366f1,#8b5cf6);
+    background: linear-gradient(90deg,var(--accent),var(--accent2));
     color: white;
-    transition: all 0.3s ease;
+    transition: 0.3s;
 }
 
-.btn-modern:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 25px rgba(139,92,246,0.5);
+.btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 10px 30px rgba(6,182,212,0.4);
 }
+
+/* ===== DASHBOARD ===== */
+.dashboard {
+    padding: 80px;
+}
+
+.dashboard h2 {
+    font-family: 'Clash Display', sans-serif;
+    font-size: 36px;
+    margin-bottom: 40px;
+}
+
+.panel {
+    background: var(--card);
+    padding: 30px;
+    border-radius: 24px;
+    border: 1px solid var(--border);
+    margin-bottom: 25px;
+    transition: 0.3s;
+}
+
+.panel:hover {
+    box-shadow: 0 15px 40px rgba(124,58,237,0.2);
+}
+
 </style>
 <meta charset="UTF-8">
 <title>StudentHubik</title>
@@ -43,16 +142,17 @@ body {
 </head>
 <body>
 
+{% if request.endpoint not in ['login', 'register'] %}
 <div class="topbar">
+{% endif %}
     <div class="top-left">
         <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo">
-        <span class="brand-name">StudentHubik</span>
     </div>
 
     {% if current_user.is_authenticated %}
     <div class="top-right">
         <div class="user-avatar">
-            current_user.name
+            {{ current_user.name }}
         </div>
         <span class="username">{{ current_user.name[0]|upper }}</span>
         <a href="{{ url_for('logout') }}" class="logout-btn">Выйти</a>

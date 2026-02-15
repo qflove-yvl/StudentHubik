@@ -1,23 +1,28 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h1 class="page-title">Кабинет преподавателя</h1>
+<div class="dashboard">
+    <h2>Панель преподавателя</h2>
 
-<div class="card-grid">
+    <div class="panel">
+        <h3>Добавить оценку</h3>
+        <form method="POST">
+            <select name="student_id">
+                {% for student in students %}
+                    <option value="{{ student.id }}">{{ student.name }}</option>
+                {% endfor %}
+            </select>
 
-    <div class="card">
-        <div class="card-title">Группы</div>
-        <div class="card-value">3</div>
-    </div>
+            <select name="subject_id">
+                {% for subject in subjects %}
+                    <option value="{{ subject.id }}">{{ subject.name }}</option>
+                {% endfor %}
+            </select>
 
-    <div class="card">
-        <div class="card-title">Студенты</div>
-        <div class="card-value">28</div>
-    </div>
+            <input type="number" name="value" placeholder="Оценка">
 
-    <div class="card">
-        <div class="card-title">Активные задания</div>
-        <div class="card-value">5</div>
+            <button class="btn">Сохранить</button>
+        </form>
     </div>
 
 </div>

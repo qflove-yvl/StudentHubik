@@ -1,24 +1,52 @@
-{% extends "base.html" %}
-{% block content %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Регистрация</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="auth-body">
 
-<div style="max-width:500px;margin:auto;margin-top:100px;">
-    <h1 class="page-title">Создать аккаунт</h1>
+<div class="auth-card fade-in">
+    <h2>Создать аккаунт</h2>
 
     <form method="POST">
-        {{ form.hidden_tag() }}
 
-        {{ form.username(class="input-field", placeholder="Имя") }}
-        {{ form.email(class="input-field", placeholder="Email") }}
-        {{ form.password(class="input-field", placeholder="Пароль") }}
-        {{ form.confirm_password(class="input-field", placeholder="Подтвердите пароль") }}
+        <select name="role" id="roleSelect" onchange="toggleFields()">
+            <option value="student">Студент</option>
+            <option value="teacher">Преподаватель</option>
+        </select>
 
-        <button type="submit" class="btn" style="width:100%;">Зарегистрироваться</button>
+        <input type="email" name="email" placeholder="Email" required>
+        <input type="password" name="password" placeholder="Пароль" required>
+
+        <div id="studentFields">
+            <input type="text" name="name" placeholder="ФИО">
+            <input type="text" name="group_name" placeholder="Название группы">
+        </div>
+
+        <div id="teacherFields" style="display:none;">
+            <input type="text" name="surname" placeholder="Фамилия">
+            <input type="text" name="firstname" placeholder="Имя">
+            <input type="text" name="patronymic" placeholder="Отчество">
+        </div>
+
+        <button type="submit">Зарегистрироваться</button>
     </form>
 
-    <p style="margin-top:20px;text-align:center;">
-        Уже есть аккаунт?
-        <a href="{{ url_for('login') }}" style="color:#c084fc;">Войти</a>
-    </p>
+    <a href="{{ url_for('login') }}">Уже есть аккаунт?</a>
 </div>
 
-{% endblock %}
+<script>
+function toggleFields() {
+    let role = document.getElementById("roleSelect").value;
+
+    document.getElementById("studentFields").style.display =
+        role === "student" ? "block" : "none";
+
+    document.getElementById("teacherFields").style.display =
+        role === "teacher" ? "block" : "none";
+}
+</script>
+
+</body>
+</html>

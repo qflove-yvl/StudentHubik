@@ -1,29 +1,34 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="max-width:900px;margin:auto;text-align:center;margin-top:80px;">
+<div class="hero">
+    <h1>Платформа нового поколения</h1>
+    <p>Управление обучением в современном цифровом формате</p>
 
-    <h1 class="page-title">Добро пожаловать в StudentHubik</h1>
-    <p style="opacity:0.7;margin-bottom:50px;font-size:18px;">
-        Платформа управления обучением нового поколения
-    </p>
+    <div class="cards">
 
-    <div class="card-grid">
         <div class="card">
-            <div class="card-title">Я студент</div>
-            <div class="card-value">🎓</div>
-            <br>
-            <a href="{{ url_for('login') }}?role=student" class="btn">Войти как студент</a>
+            <h3>Для студентов</h3>
+            <p style="color:var(--muted);margin-top:15px;">
+                Просмотр оценок, предметов и прогресса.
+            </p>
+            <a href="{{ url_for('login') }}">
+                <button class="btn">Войти</button>
+            </a>
         </div>
 
         <div class="card">
-            <div class="card-title">Я преподаватель</div>
-            <div class="card-value">👨‍🏫</div>
-            <br>
-            <a href="{{ url_for('login') }}?role=teacher" class="btn">Войти как преподаватель</a>
+            <h3>Для преподавателей</h3>
+            <p style="color:var(--muted);margin-top:15px;">
+                Управление предметами и выставление оценок.
+            </p>
+            <a href="{{ url_for('login') }}">
+                <button class="btn">Войти</button>
+            </a>
         </div>
+
     </div>
-
 </div>
+<a href="{{ url_for('register') }}">Регистрация</a>
 
 {% endblock %}
