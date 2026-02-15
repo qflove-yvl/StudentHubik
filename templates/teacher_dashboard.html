@@ -5,12 +5,12 @@
 
 <div class="card-grid">
     <div class="card">
-        <div class="card-title">Предметов у вас</div>
+        <div class="card-title">Предметов</div>
         <div class="card-value">{{ subjects|length }}</div>
     </div>
 
     <div class="card">
-        <div class="card-title">Студентов в системе</div>
+        <div class="card-title">Студентов</div>
         <div class="card-value">{{ students|length }}</div>
     </div>
 
@@ -25,11 +25,11 @@
         <h2>Выставить оценку</h2>
 
         {% if not subjects %}
-            <p class="muted-text">У вас пока нет предметов. Добавьте предметы в базу, чтобы выставлять оценки.</p>
+            <p class="muted-text">У вас пока нет предметов. Добавьте предмет в БД и попробуйте снова.</p>
         {% else %}
             <form method="POST" class="grade-form">
                 <label class="field-label" for="student_id">Студент</label>
-                <select name="student_id" id="student_id" class="input-field" required>
+                <select name="student_id" id="student_id" class="input-field select-highlight" required>
                     <option value="" disabled selected>Выберите студента</option>
                     {% for student in students %}
                         <option value="{{ student.id }}">{{ student.name }}{% if student.group_id %} · Группа {{ student.group_id }}{% endif %}</option>
@@ -44,20 +44,23 @@
                     {% endfor %}
                 </select>
 
-                <label class="field-label" for="value">Оценка (1-5)</label>
+                <label class="field-label" for="value">Оценка</label>
                 <input type="number" min="1" max="5" name="value" id="value" class="input-field" required>
 
-                <button type="submit" class="btn">Поставить оценку</button>
+                <button type="submit" class="btn">Сохранить</button>
+                <p class="muted-text hint-text">Если оценка по предмету уже была — она обновится.</p>
             </form>
         {% endif %}
     </section>
 
     <section class="card list-card">
-        <h2>Последние выставленные оценки</h2>
+        <h2>Последние оценки</h2>
+
+        <input type="text" id="grade-search" class="input-field" placeholder="Быстрый поиск по студенту/предмету">
 
         {% if recent_grades %}
         <div class="table-wrap">
-            <table class="grade-table">
+            <table class="grade-table" id="grade-table">
                 <thead>
                     <tr>
                         <th>Студент</th>
@@ -81,5 +84,22 @@
         {% endif %}
     </section>
 </div>
+
+<script>
+const searchInput = document.getElementById('grade-search');
+const gradeTable = document.getElementById('grade-table');
+
+if (searchInput && gradeTable) {
+    searchInput.addEventListener('input', () => {
+        const query = searchInput.value.toLowerCase().trim();
+        const rows = gradeTable.querySelectorAll('tbody tr');
+
+        rows.forEach((row) => {
+            const text = row.innerText.toLowerCase();
+            row.style.display = text.includes(query) ? '' : 'none';
+        });
+    });
+}
+</script>
 
 {% endblock %}

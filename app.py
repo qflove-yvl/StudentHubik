@@ -76,11 +76,16 @@ def register():
         name = request.form.get('name', '').strip()
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
         role = request.form.get('role')
         group_id = request.form.get('group_id')
 
         if not name or not email or not password or not role:
             flash('Заполните все обязательные поля')
+            return redirect(url_for('register'))
+
+        if password != confirm_password:
+            flash('Пароли не совпадают')
             return redirect(url_for('register'))
 
         if role not in {'student', 'teacher'}:
@@ -91,14 +96,13 @@ def register():
             flash('Пользователь с таким email уже существует')
             return redirect(url_for('register'))
 
+        selected_group_id = None
         if role == 'student' and group_id:
             selected_group = Group.query.get(group_id)
             if not selected_group:
                 flash('Выбрана некорректная группа')
                 return redirect(url_for('register'))
             selected_group_id = selected_group.id
-        else:
-            selected_group_id = None
 
         new_user = User(
             name=name,
@@ -124,7 +128,7 @@ def login():
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
-        selected_role = request.form.get('role')
+        selected_role = request.form.get('role', 'student')
 
         user = User.query.filter_by(email=email).first()
 
@@ -217,11 +221,16 @@ def teacher_dashboard():
             flash('Выбраны некорректные студент или предмет')
             return redirect(url_for('teacher_dashboard'))
 
-        grade = Grade(student_id=student.id, subject_id=subject.id, grade=numeric_grade)
-        db.session.add(grade)
-        db.session.commit()
-        flash(f'Оценка {numeric_grade} выставлена студенту {student.name}')
+        existing_grade = Grade.query.filter_by(student_id=student.id, subject_id=subject.id).first()
+        if existing_grade:
+            existing_grade.grade = numeric_grade
+            flash(f'Оценка обновлена: {student.name} / {subject.name} = {numeric_grade}')
+        else:
+            new_grade = Grade(student_id=student.id, subject_id=subject.id, grade=numeric_grade)
+            db.session.add(new_grade)
+            flash(f'Оценка выставлена: {student.name} / {subject.name} = {numeric_grade}')
 
+        db.session.commit()
         return redirect(url_for('teacher_dashboard'))
 
     recent_grades = (

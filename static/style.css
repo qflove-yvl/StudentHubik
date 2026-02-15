@@ -334,3 +334,14 @@ body {
     from { opacity: 0; }
     to { opacity: 1; }
 }
+
+
+.select-highlight {
+    border: 1px solid rgba(192,132,252,0.7);
+    background: linear-gradient(90deg, rgba(124,58,237,0.22), rgba(59,130,246,0.12));
+}
+
+.hint-text {
+    font-size: 13px;
+    margin-top: 8px;
+}
