@@ -1,24 +1,56 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="max-width:500px;margin:auto;margin-top:100px;">
-    <h1 class="page-title">Создать аккаунт</h1>
+<div class="auth-wrapper">
+    <div class="auth-card">
 
-    <form method="POST">
-        {{ form.hidden_tag() }}
+        <div class="auth-header">
+            <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik">
+            <h1>Регистрация</h1>
+            <p>Создайте аккаунт в StudentHubik</p>
+        </div>
 
-        {{ form.username(class="input-field", placeholder="Имя") }}
-        {{ form.email(class="input-field", placeholder="Email") }}
-        {{ form.password(class="input-field", placeholder="Пароль") }}
-        {{ form.confirm_password(class="input-field", placeholder="Подтвердите пароль") }}
+        <form method="POST" class="auth-form" id="register-form">
+            <input type="text" name="name" class="input-field" placeholder="Имя" required>
+            <input type="email" name="email" class="input-field" placeholder="Email" required>
+            <input type="password" name="password" class="input-field" placeholder="Пароль" required>
 
-        <button type="submit" class="btn" style="width:100%;">Зарегистрироваться</button>
-    </form>
+            <select name="role" id="role-select" class="input-field" required>
+                <option value="" disabled selected>Выберите роль</option>
+                <option value="student">Студент</option>
+                <option value="teacher">Преподаватель</option>
+            </select>
 
-    <p style="margin-top:20px;text-align:center;">
-        Уже есть аккаунт?
-        <a href="{{ url_for('login') }}" style="color:#c084fc;">Войти</a>
-    </p>
+            <select name="group_id" id="group-select" class="input-field hidden">
+                <option value="">Группа (необязательно)</option>
+                {% for group in groups %}
+                    <option value="{{ group.id }}">{{ group.name }}</option>
+                {% endfor %}
+            </select>
+
+            <button type="submit" class="btn auth-btn">Зарегистрироваться</button>
+        </form>
+
+        <div class="auth-footer">
+            <span>Уже есть аккаунт?</span>
+            <a href="{{ url_for('login') }}">Войти</a>
+        </div>
+
+    </div>
 </div>
+
+<script>
+const roleSelect = document.getElementById('role-select');
+const groupSelect = document.getElementById('group-select');
+
+roleSelect.addEventListener('change', () => {
+    if (roleSelect.value === 'student') {
+        groupSelect.classList.remove('hidden');
+    } else {
+        groupSelect.classList.add('hidden');
+        groupSelect.value = '';
+    }
+});
+</script>
 
 {% endblock %}

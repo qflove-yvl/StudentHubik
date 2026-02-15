@@ -7,19 +7,46 @@
 
     <div class="card">
         <div class="card-title">Группа</div>
-        <div class="card-value">{{ current_user.group_id }}</div>
+        <div class="card-value">{{ current_user.group_id or '—' }}</div>
     </div>
 
     <div class="card">
         <div class="card-title">Средний балл</div>
-        <div class="card-value">4.8</div>
+        <div class="card-value">{{ average_grade }}</div>
     </div>
 
     <div class="card">
         <div class="card-title">Предметы</div>
-        <div class="card-value">6</div>
+        <div class="card-value">{{ subject_count }}</div>
     </div>
 
 </div>
+
+<section class="card list-card student-grades">
+    <h2>Мои оценки</h2>
+
+    {% if grades %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead>
+                <tr>
+                    <th>Предмет</th>
+                    <th>Оценка</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in grades %}
+                <tr>
+                    <td>{{ item.subject.name }}</td>
+                    <td><span class="badge">{{ item.grade }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p class="muted-text">Оценок пока нет.</p>
+    {% endif %}
+</section>
 
 {% endblock %}

@@ -1,76 +1,53 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-
-<style>
-body {
-    margin: 0;
-    font-family: 'Inter', sans-serif;
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    color: white;
-}
-
-.glass {
-    background: rgba(255,255,255,0.05);
-    backdrop-filter: blur(15px);
-    border-radius: 20px;
-    padding: 30px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-}
-
-.btn-modern {
-    padding: 12px 25px;
-    border-radius: 12px;
-    border: none;
-    font-weight: 600;
-    cursor: pointer;
-    background: linear-gradient(90deg,#6366f1,#8b5cf6);
-    color: white;
-    transition: all 0.3s ease;
-}
-
-.btn-modern:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 25px rgba(139,92,246,0.5);
-}
-</style>
 <meta charset="UTF-8">
 <title>StudentHubik</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
 <div class="topbar">
     <div class="top-left">
-        <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo">
+        <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo" alt="StudentHubik">
         <span class="brand-name">StudentHubik</span>
     </div>
 
     {% if current_user.is_authenticated %}
     <div class="top-right">
-        <div class="user-avatar">
-            current_user.name
-        </div>
-        <span class="username">{{ current_user.name[0]|upper }}</span>
+        <div class="user-avatar">{{ current_user.name[0]|upper }}</div>
+        <span class="username">{{ current_user.name }}</span>
         <a href="{{ url_for('logout') }}" class="logout-btn">Выйти</a>
     </div>
     {% endif %}
 </div>
+
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div class="flash-wrapper">
+      {% for message in messages %}
+        <div class="flash-message">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
 
 <div class="app-container">
 
     {% if current_user.is_authenticated %}
     <aside class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="nav-link">Панель</a>
-        <a href="{{ url_for('student_dashboard') }}" class="nav-link">Студент</a>
-        <a href="{{ url_for('teacher_dashboard') }}" class="nav-link">Преподаватель</a>
+        {% if current_user.role == 'student' %}
+            <a href="{{ url_for('student_dashboard') }}" class="nav-link">Мои оценки</a>
+        {% elif current_user.role == 'teacher' %}
+            <a href="{{ url_for('teacher_dashboard') }}" class="nav-link">Кабинет преподавателя</a>
+        {% endif %}
     </aside>
     {% endif %}
 
-    <main class="main-content">
+    <main class="main-content{% if not current_user.is_authenticated %} no-sidebar{% endif %}">
         {% block content %}{% endblock %}
     </main>
 

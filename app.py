@@ -3,27 +3,13 @@ from flask import Flask, render_template, redirect, url_for, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-import random
-from telegram import Bot
 import os
 
 
-TELEGRAM_TOKEN = "8356757725:AAHzphHvJ_mBGhSZYN8KrIL6RQ5axoatn7o"
-bot = Bot(token=TELEGRAM_TOKEN)
-
-
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'super-secret-key'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///site.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL',
-    'sqlite:///site.db'
-)
-
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key')
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
 
 db = SQLAlchemy(app)
@@ -31,7 +17,6 @@ login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
 
-# ====== МОДЕЛЬ ПОЛЬЗОВАТЕЛЯ ======
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -43,17 +28,18 @@ class User(UserMixin, db.Model):
     is_verified = db.Column(db.Boolean, default=False)
     telegram = db.Column(db.String(100))
 
+
 class VerificationCode(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     code = db.Column(db.String(6))
+
 
 class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
 
 
-# ====== МОДЕЛЬ ПРЕДМЕТА ======
 class Subject(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -62,7 +48,6 @@ class Subject(db.Model):
     teacher = db.relationship('User', backref='subjects')
 
 
-# ====== МОДЕЛЬ ОЦЕНКИ ======
 class Grade(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('user.id'))
@@ -78,134 +63,182 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
-# ====== ГЛАВНАЯ СТРАНИЦА ======
 @app.route('/')
 def index():
     return render_template('index.html')
 
 
-# ====== РЕГИСТРАЦИЯ ======
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    groups = Group.query.all()
+    groups = Group.query.order_by(Group.name).all()
 
     if request.method == 'POST':
-        name = request.form.get('name')
-        email = request.form.get('email')
-        password = request.form.get('password')
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
         role = request.form.get('role')
         group_id = request.form.get('group_id')
 
         if not name or not email or not password or not role:
-            flash("Заполните все поля")
+            flash('Заполните все обязательные поля')
+            return redirect(url_for('register'))
+
+        if role not in {'student', 'teacher'}:
+            flash('Выберите корректную роль')
             return redirect(url_for('register'))
 
         if User.query.filter_by(email=email).first():
-            flash("Пользователь уже существует")
+            flash('Пользователь с таким email уже существует')
             return redirect(url_for('register'))
+
+        if role == 'student' and group_id:
+            selected_group = Group.query.get(group_id)
+            if not selected_group:
+                flash('Выбрана некорректная группа')
+                return redirect(url_for('register'))
+            selected_group_id = selected_group.id
+        else:
+            selected_group_id = None
 
         new_user = User(
             name=name,
             email=email,
             password=generate_password_hash(password),
             role=role,
-            group_id=group_id if role == 'student' else None
+            group_id=selected_group_id
         )
 
         db.session.add(new_user)
         db.session.commit()
 
-        flash("Регистрация успешна")
+        flash('Регистрация успешна. Теперь войдите в аккаунт.')
         return redirect(url_for('login', role=role))
 
     return render_template('register.html', groups=groups)
 
-# ====== ВХОД ======
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    role = request.args.get('role')
+    role = request.args.get('role', 'student')
 
     if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
         selected_role = request.form.get('role')
 
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password):
-
-            # 🔥 ПРОВЕРКА РОЛИ
             if user.role != selected_role:
-                flash("Вы пытаетесь войти не в ту роль")
+                flash('Вы пытаетесь войти не в ту роль')
                 return redirect(url_for('login', role=selected_role))
 
             login_user(user)
 
             if user.role == 'teacher':
                 return redirect(url_for('teacher_dashboard'))
-            else:
-                return redirect(url_for('student_dashboard'))
+            return redirect(url_for('student_dashboard'))
 
-        flash("Неверный email или пароль")
+        flash('Неверный email или пароль')
 
-    return render_template("login.html", role=role)
+    return render_template('login.html', role=role)
 
-# ====== КАБИНЕТ ======
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
     if current_user.role == 'student':
-        grades = Grade.query.filter_by(student_id=current_user.id).all()
-        return render_template('student_dashboard.html', grades=grades)
+        return redirect(url_for('student_dashboard'))
 
     if current_user.role == 'teacher':
-        return redirect('/teacher')
+        return redirect(url_for('teacher_dashboard'))
 
-    return redirect('/')
-
-
+    return redirect(url_for('index'))
 
 
-# ====== ВЫХОД ======
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('login'))
 
+
 @app.route('/student')
 @login_required
 def student_dashboard():
+    if current_user.role != 'student':
+        return redirect(url_for('teacher_dashboard'))
+
     grades = Grade.query.filter_by(student_id=current_user.id).all()
-    return render_template('student_dashboard.html', grades=grades)
+    grade_values = [grade.grade for grade in grades]
+    average_grade = round(sum(grade_values) / len(grade_values), 2) if grade_values else 0
+    subject_count = len({grade.subject_id for grade in grades})
+
+    return render_template(
+        'student_dashboard.html',
+        grades=grades,
+        average_grade=average_grade,
+        subject_count=subject_count
+    )
+
 
 @app.route('/teacher', methods=['GET', 'POST'])
 @login_required
 def teacher_dashboard():
     if current_user.role != 'teacher':
-        return redirect('/dashboard')
+        return redirect(url_for('student_dashboard'))
 
-    students = User.query.filter_by(role='student').all()
-    subjects = Subject.query.filter_by(teacher_id=current_user.id).all()
+    students = User.query.filter_by(role='student').order_by(User.name).all()
+    subjects = Subject.query.filter_by(teacher_id=current_user.id).order_by(Subject.name).all()
 
     if request.method == 'POST':
-        grade = Grade(
-            student_id=request.form['student_id'],
-            subject_id=request.form['subject_id'],
-            grade=request.form['value']  # <-- исправлено
-        )
+        student_id = request.form.get('student_id')
+        subject_id = request.form.get('subject_id')
+        grade_value = request.form.get('value')
+
+        if not student_id or not subject_id or not grade_value:
+            flash('Заполните все поля для выставления оценки')
+            return redirect(url_for('teacher_dashboard'))
+
+        student = User.query.filter_by(id=student_id, role='student').first()
+        subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
+
+        try:
+            numeric_grade = int(grade_value)
+        except (TypeError, ValueError):
+            flash('Оценка должна быть числом')
+            return redirect(url_for('teacher_dashboard'))
+
+        if numeric_grade < 1 or numeric_grade > 5:
+            flash('Оценка должна быть от 1 до 5')
+            return redirect(url_for('teacher_dashboard'))
+
+        if not student or not subject:
+            flash('Выбраны некорректные студент или предмет')
+            return redirect(url_for('teacher_dashboard'))
+
+        grade = Grade(student_id=student.id, subject_id=subject.id, grade=numeric_grade)
         db.session.add(grade)
         db.session.commit()
+        flash(f'Оценка {numeric_grade} выставлена студенту {student.name}')
+
+        return redirect(url_for('teacher_dashboard'))
+
+    recent_grades = (
+        Grade.query.join(Subject)
+        .filter(Subject.teacher_id == current_user.id)
+        .order_by(Grade.id.desc())
+        .limit(10)
+        .all()
+    )
 
     return render_template(
         'teacher_dashboard.html',
         students=students,
-        subjects=subjects
+        subjects=subjects,
+        recent_grades=recent_grades
     )
+
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-
