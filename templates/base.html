@@ -12,7 +12,6 @@
 <div class="topbar">
     <div class="top-left">
         <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo" alt="StudentHubik">
-        <span class="brand-name">StudentHubik</span>
     </div>
 
     {% if current_user.is_authenticated %}
@@ -41,8 +40,10 @@
         <a href="{{ url_for('dashboard') }}" class="nav-link">Панель</a>
         {% if current_user.role == 'student' %}
             <a href="{{ url_for('student_dashboard') }}" class="nav-link">Мои оценки</a>
+            <a href="{{ url_for('export_student_grades') }}" class="nav-link">Экспорт оценок</a>
         {% elif current_user.role == 'teacher' %}
             <a href="{{ url_for('teacher_dashboard') }}" class="nav-link">Кабинет преподавателя</a>
+            <a href="{{ url_for('export_teacher_grades') }}" class="nav-link">Экспорт оценок</a>
         {% endif %}
     </aside>
     {% endif %}

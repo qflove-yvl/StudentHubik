@@ -68,6 +68,23 @@ def ensure_default_groups():
         db.session.commit()
 
 
+def ensure_teacher_subjects(teacher_id):
+    defaults = ['Математика', 'Информатика', 'Английский']
+    existing = {
+        subject.name.lower()
+        for subject in Subject.query.filter_by(teacher_id=teacher_id).all()
+    }
+
+    created = False
+    for subject_name in defaults:
+        if subject_name.lower() not in existing:
+            db.session.add(Subject(name=subject_name, teacher_id=teacher_id))
+            created = True
+
+    if created:
+        db.session.commit()
+
+
 @app.before_request
 def initialize_database():
     if app.config.get('DB_INITIALIZED'):
@@ -135,6 +152,9 @@ def register():
         db.session.add(new_user)
         db.session.commit()
 
+        if role == 'teacher':
+            ensure_teacher_subjects(new_user.id)
+
         flash('Регистрация успешна. Теперь войдите в аккаунт.')
         return redirect(url_for('login', role=role))
 
@@ -148,7 +168,7 @@ def login():
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
-        selected_role = request.form.get('role', 'student')
+        selected_role = request.form.get('role', role)
 
         user = User.query.filter_by(email=email).first()
 
@@ -160,6 +180,7 @@ def login():
             login_user(user)
 
             if user.role == 'teacher':
+                ensure_teacher_subjects(user.id)
                 return redirect(url_for('teacher_dashboard'))
             return redirect(url_for('student_dashboard'))
 
@@ -210,11 +231,34 @@ def student_dashboard():
     )
 
 
+@app.route('/student/export-grades')
+@login_required
+def export_student_grades():
+    if current_user.role != 'student':
+        return redirect(url_for('teacher_dashboard'))
+
+    grades = Grade.query.filter_by(student_id=current_user.id).all()
+
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(['subject', 'grade'])
+    for item in grades:
+        writer.writerow([item.subject.name, item.grade])
+
+    return Response(
+        stream.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=my_grades.csv'}
+    )
+
+
 @app.route('/teacher', methods=['GET', 'POST'])
 @login_required
 def teacher_dashboard():
     if current_user.role != 'teacher':
         return redirect(url_for('student_dashboard'))
+
+    ensure_teacher_subjects(current_user.id)
 
     students = User.query.filter_by(role='student').order_by(User.name).all()
     subjects = Subject.query.filter_by(teacher_id=current_user.id).order_by(Subject.name).all()
@@ -271,6 +315,28 @@ def teacher_dashboard():
         subjects=subjects,
         recent_grades=recent_grades
     )
+
+
+@app.route('/teacher/subject', methods=['POST'])
+@login_required
+def create_subject():
+    if current_user.role != 'teacher':
+        return redirect(url_for('student_dashboard'))
+
+    subject_name = request.form.get('subject_name', '').strip()
+    if not subject_name:
+        flash('Введите название предмета')
+        return redirect(url_for('teacher_dashboard'))
+
+    exists = Subject.query.filter_by(name=subject_name, teacher_id=current_user.id).first()
+    if exists:
+        flash('Такой предмет уже существует')
+        return redirect(url_for('teacher_dashboard'))
+
+    db.session.add(Subject(name=subject_name, teacher_id=current_user.id))
+    db.session.commit()
+    flash(f'Предмет «{subject_name}» добавлен')
+    return redirect(url_for('teacher_dashboard'))
 
 
 @app.route('/teacher/export-grades')

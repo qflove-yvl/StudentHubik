@@ -3,7 +3,7 @@
 
 <div style="max-width:900px;margin:auto;text-align:center;margin-top:80px;">
 
-    <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik" style="margin-bottom:14px;">
+    <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo home-main-logo" alt="StudentHubik">
 
     <h1 class="page-title">Добро пожаловать в StudentHubik</h1>
     <p style="opacity:0.7;margin-bottom:50px;font-size:18px;">
@@ -15,14 +15,14 @@
             <div class="card-title">Я студент</div>
             <div class="card-value"><img src="{{ url_for('static', filename='logo.svg') }}" class="mini-role-logo" alt="Студент"></div>
             <br>
-            <a href="{{ url_for('login') }}?role=student" class="btn">Войти как студент</a>
+            <a href="{{ url_for('login', role='student') }}" class="btn">Войти как студент</a>
         </div>
 
         <div class="card">
             <div class="card-title">Я преподаватель</div>
             <div class="card-value"><img src="{{ url_for('static', filename='logo.svg') }}" class="mini-role-logo" alt="Преподаватель"></div>
             <br>
-            <a href="{{ url_for('login') }}?role=teacher" class="btn">Войти как преподаватель</a>
+            <a href="{{ url_for('login', role='teacher') }}" class="btn">Войти как преподаватель</a>
         </div>
     </div>
 

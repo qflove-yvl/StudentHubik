@@ -7,6 +7,29 @@
     <a href="{{ url_for('export_teacher_grades') }}" class="btn">Скачать оценки (CSV)</a>
 </div>
 
+<div class="panel-grid" style="margin-bottom:24px;">
+    <section class="card form-card">
+        <h2>Добавить предмет</h2>
+        <form method="POST" action="{{ url_for('create_subject') }}">
+            <input type="text" name="subject_name" class="input-field" placeholder="Например: Физика" required>
+            <button type="submit" class="btn">Добавить предмет</button>
+        </form>
+    </section>
+
+    <section class="card list-card">
+        <h2>Ваши предметы</h2>
+        {% if subjects %}
+            <div class="subject-tags">
+                {% for subject in subjects %}
+                    <span class="subject-tag">{{ subject.name }}</span>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="muted-text">Предметов пока нет.</p>
+        {% endif %}
+    </section>
+</div>
+
 <div class="card-grid">
     <div class="card">
         <div class="card-title">Предметов</div>
@@ -29,7 +52,7 @@
         <h2>Выставить оценку</h2>
 
         {% if not subjects %}
-            <p class="muted-text">У вас пока нет предметов. Добавьте предмет в БД и попробуйте снова.</p>
+            <p class="muted-text">У вас пока нет предметов. Добавьте предмет выше и попробуйте снова.</p>
         {% else %}
             <form method="POST" class="grade-form">
                 <label class="field-label" for="student_id">Студент</label>
@@ -52,7 +75,7 @@
                 <input type="number" min="1" max="5" name="value" id="value" class="input-field" required>
 
                 <button type="submit" class="btn">Сохранить</button>
-                <p class="muted-text hint-text">Если оценка по предмету уже была — она обновится.</p>
+                <p class="muted-text hint-text">Если оценка уже была — мы её обновим.</p>
             </form>
         {% endif %}
     </section>

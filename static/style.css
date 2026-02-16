@@ -17,11 +17,11 @@ body {
 
 .app-container {
     display: flex;
-    min-height: calc(100vh - 70px);
+    min-height: calc(100vh - 82px);
 }
 
 .sidebar {
-    width: 280px;
+    width: 290px;
     backdrop-filter: blur(30px);
     background: rgba(255,255,255,0.05);
     border-right: 1px solid rgba(255,255,255,0.08);
@@ -75,18 +75,18 @@ body {
 
 .card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 30px;
-    margin-bottom: 30px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 24px;
+    margin-bottom: 28px;
 }
 
 .card {
-    padding: 30px;
+    padding: 28px;
     border-radius: 24px;
     backdrop-filter: blur(25px);
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.1);
-    transition: 0.4s ease;
+    transition: 0.35s ease;
     box-shadow: 0 20px 50px rgba(0,0,0,0.35);
     position: relative;
     overflow: hidden;
@@ -98,7 +98,7 @@ body {
 
 .card-title {
     font-size: 16px;
-    opacity: 0.8;
+    opacity: 0.82;
     margin-bottom: 15px;
 }
 
@@ -108,6 +108,7 @@ body {
 }
 
 .btn {
+    display: inline-block;
     padding: 14px 28px;
     border-radius: 14px;
     border: none;
@@ -117,6 +118,7 @@ body {
     transition: 0.3s ease;
     background: linear-gradient(90deg,#6366f1,#7c3aed);
     color: #fff;
+    text-decoration: none;
 }
 
 .btn:hover {
@@ -146,14 +148,14 @@ body {
 }
 
 .topbar {
-    height: 70px;
+    height: 82px;
     backdrop-filter: blur(30px);
     background: rgba(255,255,255,0.05);
     border-bottom: 1px solid rgba(255,255,255,0.08);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 40px;
+    padding: 0 32px;
     position: sticky;
     top: 0;
     z-index: 100;
@@ -167,15 +169,9 @@ body {
 }
 
 .top-logo {
-    width: 42px;
-}
-
-.brand-name {
-    font-weight: 800;
-    font-size: 20px;
-    background: linear-gradient(90deg,#fff,#c084fc);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    width: 72px;
+    height: 72px;
+    object-fit: contain;
 }
 
 .user-avatar {
@@ -210,7 +206,7 @@ body {
 
 .auth-card {
     width: 100%;
-    max-width: 520px;
+    max-width: 560px;
     backdrop-filter: blur(22px);
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.1);
@@ -234,7 +230,9 @@ body {
 }
 
 .auth-logo {
-    width: 62px;
+    width: 78px;
+    height: 78px;
+    object-fit: contain;
 }
 
 .auth-btn {
@@ -257,7 +255,7 @@ body {
 .flash-wrapper {
     position: fixed;
     right: 20px;
-    top: 85px;
+    top: 95px;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -290,7 +288,7 @@ body {
 }
 
 .muted-text {
-    color: rgba(255,255,255,0.7);
+    color: rgba(255,255,255,0.72);
 }
 
 .table-wrap {
@@ -325,17 +323,6 @@ body {
     display: none;
 }
 
-@keyframes slideIn {
-    from { transform: translateX(-50px); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-
 .select-highlight {
     border: 1px solid rgba(192,132,252,0.7);
     background: linear-gradient(90deg, rgba(124,58,237,0.22), rgba(59,130,246,0.12));
@@ -346,10 +333,15 @@ body {
     margin-top: 8px;
 }
 
+.home-main-logo {
+    width: 110px;
+    height: 110px;
+    margin-bottom: 14px;
+}
 
 .mini-role-logo {
-    width: 54px;
-    height: 54px;
+    width: 96px;
+    height: 96px;
     object-fit: contain;
 }
 
@@ -357,4 +349,27 @@ body {
     display: flex;
     justify-content: flex-end;
     margin-bottom: 16px;
+}
+
+.subject-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.subject-tag {
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(196,181,253,0.6);
+    background: rgba(167,139,250,0.18);
+}
+
+@keyframes slideIn {
+    from { transform: translateX(-50px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
