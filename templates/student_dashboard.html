@@ -20,14 +20,26 @@
         <div class="card-value">{{ subject_count }}</div>
     </div>
 
+    <div class="card">
+        <div class="card-title">Лучшая оценка</div>
+        <div class="card-value">{{ best_grade }}</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Минимальная оценка</div>
+        <div class="card-value">{{ worst_grade }}</div>
+    </div>
+
 </div>
 
 <section class="card list-card student-grades">
     <h2>Мои оценки</h2>
 
+    <input type="text" id="student-grade-search" class="input-field" placeholder="Поиск по предмету">
+
     {% if grades %}
     <div class="table-wrap">
-        <table class="grade-table">
+        <table class="grade-table" id="student-grade-table">
             <thead>
                 <tr>
                     <th>Предмет</th>
@@ -48,5 +60,22 @@
         <p class="muted-text">Оценок пока нет.</p>
     {% endif %}
 </section>
+
+<script>
+const studentSearch = document.getElementById('student-grade-search');
+const studentTable = document.getElementById('student-grade-table');
+
+if (studentSearch && studentTable) {
+    studentSearch.addEventListener('input', () => {
+        const query = studentSearch.value.toLowerCase().trim();
+        const rows = studentTable.querySelectorAll('tbody tr');
+
+        rows.forEach((row) => {
+            const text = row.innerText.toLowerCase();
+            row.style.display = text.includes(query) ? '' : 'none';
+        });
+    });
+}
+</script>
 
 {% endblock %}

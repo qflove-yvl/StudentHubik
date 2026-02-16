@@ -345,3 +345,16 @@ body {
     font-size: 13px;
     margin-top: 8px;
 }
+
+
+.mini-role-logo {
+    width: 54px;
+    height: 54px;
+    object-fit: contain;
+}
+
+.dashboard-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 16px;
+}

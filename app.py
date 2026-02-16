@@ -1,8 +1,11 @@
 from flask import flash
 from flask import Flask, render_template, redirect, url_for, request
+from flask import Response
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+import csv
+import io
 import os
 
 
@@ -56,6 +59,23 @@ class Grade(db.Model):
 
     student = db.relationship('User', foreign_keys=[student_id])
     subject = db.relationship('Subject')
+
+
+def ensure_default_groups():
+    if Group.query.count() == 0:
+        for group_name in ['ИС-101', 'ИС-102', 'ИС-201']:
+            db.session.add(Group(name=group_name))
+        db.session.commit()
+
+
+@app.before_request
+def initialize_database():
+    if app.config.get('DB_INITIALIZED'):
+        return
+
+    db.create_all()
+    ensure_default_groups()
+    app.config['DB_INITIALIZED'] = True
 
 
 @login_manager.user_loader
@@ -177,12 +197,16 @@ def student_dashboard():
     grade_values = [grade.grade for grade in grades]
     average_grade = round(sum(grade_values) / len(grade_values), 2) if grade_values else 0
     subject_count = len({grade.subject_id for grade in grades})
+    best_grade = max(grade_values) if grade_values else '—'
+    worst_grade = min(grade_values) if grade_values else '—'
 
     return render_template(
         'student_dashboard.html',
         grades=grades,
         average_grade=average_grade,
-        subject_count=subject_count
+        subject_count=subject_count,
+        best_grade=best_grade,
+        worst_grade=worst_grade
     )
 
 
@@ -246,6 +270,32 @@ def teacher_dashboard():
         students=students,
         subjects=subjects,
         recent_grades=recent_grades
+    )
+
+
+@app.route('/teacher/export-grades')
+@login_required
+def export_teacher_grades():
+    if current_user.role != 'teacher':
+        return redirect(url_for('student_dashboard'))
+
+    grades = (
+        Grade.query.join(Subject)
+        .filter(Subject.teacher_id == current_user.id)
+        .order_by(Grade.id.desc())
+        .all()
+    )
+
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(['student', 'subject', 'grade'])
+    for item in grades:
+        writer.writerow([item.student.name, item.subject.name, item.grade])
+
+    return Response(
+        stream.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=teacher_grades.csv'}
     )
 
 
