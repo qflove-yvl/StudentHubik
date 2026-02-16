@@ -17,7 +17,7 @@ body {
 
 .app-container {
     display: flex;
-    min-height: calc(100vh - 82px);
+    min-height: calc(100vh - 128px);
 }
 
 .sidebar {
@@ -148,14 +148,14 @@ body {
 }
 
 .topbar {
-    height: 82px;
+    height: 128px;
     backdrop-filter: blur(30px);
     background: rgba(255,255,255,0.05);
     border-bottom: 1px solid rgba(255,255,255,0.08);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 32px;
+    padding: 0 28px;
     position: sticky;
     top: 0;
     z-index: 100;
@@ -169,8 +169,8 @@ body {
 }
 
 .top-logo {
-    width: 72px;
-    height: 72px;
+    width: 150px;
+    height: 150px;
     object-fit: contain;
 }
 
@@ -230,8 +230,8 @@ body {
 }
 
 .auth-logo {
-    width: 78px;
-    height: 78px;
+    width: 120px;
+    height: 120px;
     object-fit: contain;
 }
 
@@ -340,8 +340,8 @@ body {
 }
 
 .mini-role-logo {
-    width: 96px;
-    height: 96px;
+    width: 132px;
+    height: 132px;
     object-fit: contain;
 }
 

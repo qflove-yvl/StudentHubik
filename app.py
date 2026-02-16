@@ -168,14 +168,17 @@ def login():
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
-        selected_role = request.form.get('role', role)
+        selected_role = request.form.get('role')
 
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password):
+            if selected_role not in {'student', 'teacher'}:
+                selected_role = user.role
+
             if user.role != selected_role:
                 flash('Вы пытаетесь войти не в ту роль')
-                return redirect(url_for('login', role=selected_role))
+                return redirect(url_for('login', role=user.role))
 
             login_user(user)
 

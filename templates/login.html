@@ -13,7 +13,10 @@
         <form method="POST">
             <input type="email" name="email" class="input-field" placeholder="Email" required>
             <input type="password" name="password" class="input-field" placeholder="Пароль" required>
-            <input type="hidden" name="role" value="{{ role }}">
+            <select name="role" class="input-field" required>
+                <option value="student" {% if role == 'student' %}selected{% endif %}>Студент</option>
+                <option value="teacher" {% if role == 'teacher' %}selected{% endif %}>Преподаватель</option>
+            </select>
             <button type="submit" class="btn auth-btn">Войти</button>
         </form>
 
