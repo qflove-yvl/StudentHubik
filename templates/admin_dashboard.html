@@ -135,7 +135,7 @@
     {% endif %}
 </section>
 
-<section class="card">
+<section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Все одобренные студенты (с удалением аккаунта)</h2>
     {% if approved_students %}
         <div class="table-wrap">
@@ -159,6 +159,47 @@
         </div>
     {% else %}
         <p class="muted-text">Пока нет одобренных студентов.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-top:24px;">
+    <h2 style="margin-bottom:14px;">Журнал действий (аудит)</h2>
+    {% if recent_audit %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead><tr><th>ID</th><th>Кто</th><th>Действие</th><th>Детали</th></tr></thead>
+            <tbody>
+                {% for item in recent_audit %}
+                <tr>
+                    <td>{{ item.id }}</td>
+                    <td>{{ item.actor.name if item.actor else 'Система/Гость' }}</td>
+                    <td>{{ item.action }}</td>
+                    <td>{{ item.details }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p class="muted-text">Логов пока нет.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-top:24px;">
+    <h2 style="margin-bottom:14px;">Все одобренные преподаватели</h2>
+    {% if approved_teachers %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead><tr><th>ФИО</th><th>Email</th><th>Telegram</th></tr></thead>
+            <tbody>
+            {% for teacher in approved_teachers %}
+                <tr><td>{{ teacher.name }}</td><td>{{ teacher.email }}</td><td>{{ teacher.telegram or '—' }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="muted-text">Нет одобренных преподавателей.</p>
     {% endif %}
 </section>
 

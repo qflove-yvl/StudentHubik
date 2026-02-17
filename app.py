@@ -63,6 +63,15 @@ class Grade(db.Model):
     student = db.relationship('User', foreign_keys=[student_id])
     subject = db.relationship('Subject')
 
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    actor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    action = db.Column(db.String(120), nullable=False)
+    details = db.Column(db.String(300))
+
+    actor = db.relationship('User')
+
+
 
 def ensure_default_groups():
     if Group.query.count() == 0:
@@ -116,6 +125,19 @@ def normalize_group_name(group_name):
 
 def email_looks_valid(email):
     return re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email) is not None
+
+
+def log_audit(action, details=''):
+    actor_id = current_user.id if current_user.is_authenticated else None
+    db.session.add(AuditLog(actor_id=actor_id, action=action, details=details[:300]))
+    db.session.commit()
+
+
+def password_matches(password_hash, password):
+    try:
+        return check_password_hash(password_hash, password)
+    except ValueError:
+        return False
 
 
 def full_name_looks_valid(full_name):
@@ -226,7 +248,7 @@ def login():
 
         user = User.query.filter_by(email=email).first()
 
-        if user and check_password_hash(user.password, password):
+        if user and password_matches(user.password, password):
             if selected_role not in {'student', 'teacher', 'admin'}:
                 selected_role = user.role
 
@@ -238,6 +260,7 @@ def login():
                 return redirect(url_for('login', role=user.role))
 
             login_user(user)
+            log_audit('login_success', f'user={user.email}, role={user.role}')
 
             if user.role == 'teacher':
                 return redirect(url_for('teacher_dashboard'))
@@ -245,6 +268,7 @@ def login():
                 return redirect(url_for('admin_dashboard'))
             return redirect(url_for('student_dashboard'))
 
+        log_audit('login_failed', f'email={email}, role={selected_role or role}')
         flash('Неверный email или пароль')
 
     return render_template('login.html', role=role)
@@ -374,10 +398,12 @@ def teacher_dashboard():
         existing_grade = Grade.query.filter_by(student_id=student.id, subject_id=subject.id).first()
         if existing_grade:
             existing_grade.grade = numeric_grade
+            log_audit('update_grade', f'student={student.id}, subject={subject.id}, grade={numeric_grade}')
             flash(f'Оценка обновлена: {student.name} / {subject.name} = {numeric_grade}')
         else:
             new_grade = Grade(student_id=student.id, subject_id=subject.id, grade=numeric_grade)
             db.session.add(new_grade)
+            log_audit('create_grade', f'student={student.id}, subject={subject.id}, grade={numeric_grade}')
             flash(f'Оценка выставлена: {student.name} / {subject.name} = {numeric_grade}')
 
         db.session.commit()
@@ -439,6 +465,7 @@ def admin_dashboard():
 
     all_groups = Group.query.order_by(Group.name).all()
     all_subjects = Subject.query.order_by(Subject.name).all()
+    recent_audit = AuditLog.query.order_by(AuditLog.id.desc()).limit(40).all()
 
     return render_template(
         'admin_dashboard.html',
@@ -447,7 +474,8 @@ def admin_dashboard():
         approved_teachers=approved_teachers,
         approved_students=approved_students,
         all_groups=all_groups,
-        all_subjects=all_subjects
+        all_subjects=all_subjects,
+        recent_audit=recent_audit
     )
 
 
@@ -465,6 +493,7 @@ def approve_user(user_id):
     user.is_verified = True
     db.session.commit()
 
+    log_audit('approve_user', f'id={user.id}, role={user.role}')
     flash(f'Пользователь {user.name} одобрен')
     return redirect(url_for('admin_dashboard'))
 
@@ -489,6 +518,7 @@ def reject_user(user_id):
 
     db.session.delete(user)
     db.session.commit()
+    log_audit('reject_user', f'id={user_id}')
     flash('Заявка отклонена и аккаунт удалён')
     return redirect(url_for('admin_dashboard'))
 
@@ -507,6 +537,7 @@ def admin_delete_student(user_id):
     Grade.query.filter_by(student_id=student.id).delete()
     db.session.delete(student)
     db.session.commit()
+    log_audit('delete_student', f'id={user_id}')
     flash('Аккаунт студента удалён')
     return redirect(url_for('admin_dashboard'))
 
@@ -528,6 +559,7 @@ def admin_add_group():
 
     db.session.add(Group(name=group_name))
     db.session.commit()
+    log_audit('add_group', group_name)
     flash(f'Группа {group_name} добавлена')
     return redirect(url_for('admin_dashboard'))
 
@@ -550,6 +582,7 @@ def admin_delete_group(group_id):
 
     db.session.delete(group)
     db.session.commit()
+    log_audit('delete_group', f'id={group_id}')
     flash('Группа удалена')
     return redirect(url_for('admin_dashboard'))
 
@@ -576,6 +609,7 @@ def admin_add_subject_for_teacher(teacher_id):
 
     db.session.add(Subject(name=subject_name, teacher_id=teacher.id))
     db.session.commit()
+    log_audit('add_subject', f'teacher={teacher.id}, subject={subject_name}')
     flash(f'Предмет {subject_name} назначен преподавателю {teacher.name}')
     return redirect(url_for('admin_dashboard'))
 
@@ -594,6 +628,7 @@ def admin_delete_subject(subject_id):
     Grade.query.filter_by(subject_id=subject.id).delete()
     db.session.delete(subject)
     db.session.commit()
+    log_audit('delete_subject', f'id={subject_id}')
     flash('Предмет удалён')
     return redirect(url_for('admin_dashboard'))
 
