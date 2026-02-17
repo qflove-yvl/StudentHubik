@@ -122,7 +122,7 @@ def email_looks_real(email):
     domain = email.split('@')[-1]
     try:
         socket.getaddrinfo(domain, None)
-    except socket.gaierror:
+    except (socket.gaierror, OSError):
         return False
 
     return True
@@ -227,18 +227,17 @@ def login():
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password):
-            if selected_role not in {'student', 'teacher', 'admin'}:
-                selected_role = user.role
-
-            if user.role != selected_role:
-                flash('Вы пытаетесь войти не в ту роль')
-                return redirect(url_for('login', role=user.role))
-
             if user.role == 'teacher' and not user.is_verified:
                 flash('Доступ преподавателя ещё не одобрен администратором')
                 return redirect(url_for('login', role='teacher'))
 
+            if selected_role not in {'student', 'teacher', 'admin'}:
+                selected_role = user.role
+
             login_user(user)
+
+            if selected_role != user.role:
+                flash(f'Вы вошли как {user.role}, потому что аккаунт зарегистрирован именно в этой роли')
 
             if user.role == 'teacher':
                 ensure_teacher_subjects(user.id)

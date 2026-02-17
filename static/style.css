@@ -17,7 +17,7 @@ body {
 
 .app-container {
     display: flex;
-    min-height: calc(100vh - 96px);
+    min-height: calc(100vh - 112px);
 }
 
 .sidebar {
@@ -146,7 +146,7 @@ body {
 }
 
 .topbar {
-    height: 96px;
+    height: 112px;
     backdrop-filter: blur(22px);
     background: rgba(8, 14, 30, 0.72);
     border-bottom: 1px solid rgba(255,255,255,0.08);
@@ -167,8 +167,8 @@ body {
 }
 
 .top-logo {
-    width: 140px;
-    height: 140px;
+    width: 180px;
+    height: 180px;
     object-fit: contain;
 }
 
@@ -332,8 +332,8 @@ body {
 }
 
 .home-main-logo {
-    width: 190px;
-    height: 190px;
+    width: 220px;
+    height: 220px;
     margin-bottom: 12px;
 }
 
