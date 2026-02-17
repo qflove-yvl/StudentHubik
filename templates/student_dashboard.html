@@ -15,7 +15,7 @@
     </div>
 
     <div class="card">
-        <div class="card-title">Средний балл</div>
+        <div class="card-title">Средний балл (общий)</div>
         <div class="card-value">{{ average_grade }}</div>
     </div>
 
@@ -36,10 +36,38 @@
 
 </div>
 
+<section class="card" style="margin-bottom:18px;">
+    <h2>Средний балл по предметам</h2>
+    {% if subject_averages %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead>
+                <tr>
+                    <th>Предмет</th>
+                    <th>Средний балл</th>
+                    <th>Оценок</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for subject_name, subject_avg, grades_count in subject_averages %}
+                <tr>
+                    <td>{{ subject_name }}</td>
+                    <td>{{ subject_avg }}</td>
+                    <td>{{ grades_count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="muted-text">Пока нет оценок для расчёта среднего.</p>
+    {% endif %}
+</section>
+
 <section class="card list-card student-grades">
     <h2>Мои оценки</h2>
 
-    <input type="text" id="student-grade-search" class="input-field" placeholder="Поиск по предмету">
+    <input type="text" id="student-grade-search" class="input-field" placeholder="Поиск по предмету/комментарию/дате">
 
     {% if grades %}
     <div class="table-wrap">
@@ -48,6 +76,8 @@
                 <tr>
                     <th>Предмет</th>
                     <th>Оценка</th>
+                    <th>Комментарий</th>
+                    <th>Выставлена</th>
                 </tr>
             </thead>
             <tbody>
@@ -55,6 +85,8 @@
                 <tr>
                     <td>{{ item.subject.name }}</td>
                     <td><span class="badge">{{ item.grade }}</span></td>
+                    <td>{{ item.comment or '—' }}</td>
+                    <td>{{ item.graded_at.strftime('%d.%m.%Y %H:%M') if item.graded_at else '—' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

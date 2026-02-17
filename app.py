@@ -241,10 +241,13 @@ def redirect_to_role_dashboard():
 def inject_template_security():
     default_ui = {'theme': 'dark', 'compact': 'off', 'animations': 'on'}
     if current_user.is_authenticated:
+        user_theme = getattr(current_user, 'theme', 'dark') or 'dark'
+        user_compact = bool(getattr(current_user, 'compact_mode', False))
+        user_animations = bool(getattr(current_user, 'animations_enabled', True))
         default_ui = {
-            'theme': current_user.theme or 'dark',
-            'compact': 'on' if current_user.compact_mode else 'off',
-            'animations': 'on' if current_user.animations_enabled else 'off'
+            'theme': user_theme if user_theme in {'dark', 'light'} else 'dark',
+            'compact': 'on' if user_compact else 'off',
+            'animations': 'on' if user_animations else 'off'
         }
 
     return {
@@ -464,12 +467,25 @@ def student_dashboard():
     if current_user.role != 'student':
         return redirect_to_role_dashboard()
 
-    grades = Grade.query.filter_by(student_id=current_user.id).all()
+    grades = (
+        Grade.query.filter_by(student_id=current_user.id)
+        .order_by(Grade.graded_at.desc(), Grade.id.desc())
+        .all()
+    )
     grade_values = [grade.grade for grade in grades]
     average_grade = round(sum(grade_values) / len(grade_values), 2) if grade_values else 0
     subject_count = len({grade.subject_id for grade in grades})
     best_grade = max(grade_values) if grade_values else '—'
     worst_grade = min(grade_values) if grade_values else '—'
+
+    subject_averages = (
+        db.session.query(Subject.name, func.round(func.avg(Grade.grade), 2), func.count(Grade.id))
+        .join(Grade, Grade.subject_id == Subject.id)
+        .filter(Grade.student_id == current_user.id)
+        .group_by(Subject.id, Subject.name)
+        .order_by(Subject.name)
+        .all()
+    )
 
     group_name = '—'
     if current_user.group_id:
@@ -484,7 +500,8 @@ def student_dashboard():
         subject_count=subject_count,
         best_grade=best_grade,
         worst_grade=worst_grade,
-        group_name=group_name
+        group_name=group_name,
+        subject_averages=subject_averages
     )
 
 
@@ -518,58 +535,37 @@ def teacher_dashboard():
     students = User.query.filter_by(role='student', is_verified=True).order_by(User.name).all()
     groups_by_id = {group.id: group.name for group in Group.query.all()}
     subjects = Subject.query.filter_by(teacher_id=current_user.id).order_by(Subject.name).all()
-    action = request.form.get('action')
 
-    if request.method == 'POST' and action in {'create_or_update', 'delete'}:
-        student_id = request.form.get('student_id')
-        subject_id = request.form.get('subject_id')
-        grade_value = request.form.get('value')
-        comment = request.form.get('comment', '').strip()
+    if request.method == 'POST':
+        action = request.form.get('action')
 
-        if not student_id or not subject_id:
-            flash('Выберите студента и предмет')
-            return redirect(url_for('teacher_dashboard'))
+        if action == 'create_grade':
+            student_id = request.form.get('student_id')
+            subject_id = request.form.get('subject_id')
+            grade_value = request.form.get('value')
+            comment = request.form.get('comment', '').strip()
 
-        student = User.query.filter_by(id=student_id, role='student', is_verified=True).first()
-        subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
-
-        if not student or not subject:
-            flash('Выбраны некорректные студент или предмет')
-            return redirect(url_for('teacher_dashboard'))
-
-        existing_grade = Grade.query.filter_by(student_id=student.id, subject_id=subject.id).first()
-        if action == 'delete':
-            if not existing_grade:
-                flash('Для выбранного студента и предмета оценка не найдена')
+            if not student_id or not subject_id or not grade_value:
+                flash('Заполните все поля для выставления оценки')
                 return redirect(url_for('teacher_dashboard'))
 
-            db.session.delete(existing_grade)
-            db.session.commit()
-            log_audit('delete_grade', f'student={student.id}, subject={subject.id}')
-            flash(f'Оценка удалена: {student.name} / {subject.name}')
-            return redirect(url_for('teacher_dashboard'))
+            student = User.query.filter_by(id=student_id, role='student', is_verified=True).first()
+            subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
 
-        if not grade_value:
-            flash('Укажите оценку от 1 до 5')
-            return redirect(url_for('teacher_dashboard'))
+            if not student or not subject:
+                flash('Выбраны некорректные студент или предмет')
+                return redirect(url_for('teacher_dashboard'))
 
-        try:
-            numeric_grade = int(grade_value)
-        except (TypeError, ValueError):
-            flash('Оценка должна быть числом')
-            return redirect(url_for('teacher_dashboard'))
+            try:
+                numeric_grade = int(grade_value)
+            except (TypeError, ValueError):
+                flash('Оценка должна быть числом')
+                return redirect(url_for('teacher_dashboard'))
 
-        if numeric_grade < 1 or numeric_grade > 5:
-            flash('Оценка должна быть от 1 до 5')
-            return redirect(url_for('teacher_dashboard'))
+            if numeric_grade < 1 or numeric_grade > 5:
+                flash('Оценка должна быть от 1 до 5')
+                return redirect(url_for('teacher_dashboard'))
 
-        if existing_grade:
-            existing_grade.grade = numeric_grade
-            existing_grade.comment = comment[:300]
-            existing_grade.graded_at = datetime.utcnow()
-            log_audit('update_grade', f'student={student.id}, subject={subject.id}, grade={numeric_grade}')
-            flash(f'Оценка обновлена: {student.name} / {subject.name} = {numeric_grade}')
-        else:
             new_grade = Grade(
                 student_id=student.id,
                 subject_id=subject.id,
@@ -578,17 +574,67 @@ def teacher_dashboard():
                 graded_at=datetime.utcnow()
             )
             db.session.add(new_grade)
-            log_audit('create_grade', f'student={student.id}, subject={subject.id}, grade={numeric_grade}')
-            flash(f'Оценка выставлена: {student.name} / {subject.name} = {numeric_grade}')
+            db.session.commit()
+            log_audit('create_grade', f'grade_id={new_grade.id}, student={student.id}, subject={subject.id}, grade={numeric_grade}')
+            flash(f'Оценка добавлена: {student.name} / {subject.name} = {numeric_grade}')
+            return redirect(url_for('teacher_dashboard'))
 
-        db.session.commit()
+        if action in {'update_grade', 'delete_grade'}:
+            grade_id = request.form.get('grade_id')
+            try:
+                grade_id = int(grade_id)
+            except (TypeError, ValueError):
+                flash('Некорректная оценка')
+                return redirect(url_for('teacher_dashboard'))
+
+            grade_item = (
+                Grade.query.join(Subject)
+                .filter(Grade.id == grade_id, Subject.teacher_id == current_user.id)
+                .first()
+            )
+            if not grade_item:
+                flash('Оценка не найдена или недоступна')
+                return redirect(url_for('teacher_dashboard'))
+
+            if action == 'delete_grade':
+                db.session.delete(grade_item)
+                db.session.commit()
+                log_audit('delete_grade', f'grade_id={grade_id}')
+                flash('Оценка удалена')
+                return redirect(url_for('teacher_dashboard'))
+
+            grade_value = request.form.get('value')
+            comment = request.form.get('comment', '').strip()
+            if not grade_value:
+                flash('Укажите оценку от 1 до 5')
+                return redirect(url_for('teacher_dashboard'))
+
+            try:
+                numeric_grade = int(grade_value)
+            except (TypeError, ValueError):
+                flash('Оценка должна быть числом')
+                return redirect(url_for('teacher_dashboard'))
+
+            if numeric_grade < 1 or numeric_grade > 5:
+                flash('Оценка должна быть от 1 до 5')
+                return redirect(url_for('teacher_dashboard'))
+
+            grade_item.grade = numeric_grade
+            grade_item.comment = comment[:300]
+            grade_item.graded_at = datetime.utcnow()
+            db.session.commit()
+            log_audit('update_grade', f'grade_id={grade_id}, grade={numeric_grade}')
+            flash('Оценка обновлена')
+            return redirect(url_for('teacher_dashboard'))
+
+        flash('Некорректное действие')
         return redirect(url_for('teacher_dashboard'))
 
     recent_grades = (
         Grade.query.join(Subject)
         .filter(Subject.teacher_id == current_user.id)
-        .order_by(Grade.id.desc())
-        .limit(10)
+        .order_by(Grade.graded_at.desc(), Grade.id.desc())
+        .limit(50)
         .all()
     )
 
@@ -625,9 +671,9 @@ def export_teacher_grades():
 
     stream = io.StringIO()
     writer = csv.writer(stream)
-    writer.writerow(['student', 'subject', 'grade'])
+    writer.writerow(['student', 'subject', 'grade', 'comment', 'graded_at'])
     for item in grades:
-        writer.writerow([item.student.name, item.subject.name, item.grade])
+        writer.writerow([item.student.name, item.subject.name, item.grade, item.comment or '', item.graded_at.isoformat() if item.graded_at else ''])
 
     return Response(
         stream.getvalue(),

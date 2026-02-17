@@ -1,30 +1,32 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% set ui = ui_settings|default({'theme': 'dark', 'compact': 'off', 'animations': 'on'}) %}
+
 <h1 class="page-title">Настройки</h1>
 
 <div class="panel-grid">
     <section class="card form-card">
         <h2>Внешний вид</h2>
         <form method="POST" id="settings-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token|default('') }}">
 
             <label class="field-label" for="theme-select">Тема</label>
             <select id="theme-select" name="theme" class="input-field">
-                <option value="dark" {% if ui_settings.theme == 'dark' %}selected{% endif %}>Тёмная</option>
-                <option value="light" {% if ui_settings.theme == 'light' %}selected{% endif %}>Светлая</option>
+                <option value="dark" {% if ui.theme == 'dark' %}selected{% endif %}>Тёмная</option>
+                <option value="light" {% if ui.theme == 'light' %}selected{% endif %}>Светлая</option>
             </select>
 
             <label class="field-label" for="compact-select">Компактный режим</label>
             <select id="compact-select" name="compact_mode" class="input-field">
-                <option value="off" {% if ui_settings.compact == 'off' %}selected{% endif %}>Обычный</option>
-                <option value="on" {% if ui_settings.compact == 'on' %}selected{% endif %}>Компактный</option>
+                <option value="off" {% if ui.compact == 'off' %}selected{% endif %}>Обычный</option>
+                <option value="on" {% if ui.compact == 'on' %}selected{% endif %}>Компактный</option>
             </select>
 
             <label class="field-label" for="animations-select">Анимации</label>
             <select id="animations-select" name="animations_enabled" class="input-field">
-                <option value="on" {% if ui_settings.animations == 'on' %}selected{% endif %}>Включены</option>
-                <option value="off" {% if ui_settings.animations == 'off' %}selected{% endif %}>Выключены</option>
+                <option value="on" {% if ui.animations == 'on' %}selected{% endif %}>Включены</option>
+                <option value="off" {% if ui.animations == 'off' %}selected{% endif %}>Выключены</option>
             </select>
 
             <button id="save-ui-settings" class="btn" type="submit">Сохранить настройки</button>
