@@ -1,5 +1,7 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="{{ ui_settings.theme }}" data-compact="{{ ui_settings.compact }}" data-animations="{{ ui_settings.animations }}">
+{% set _ui = ui_settings|default({'theme': 'dark', 'compact': 'off', 'animations': 'on'}) %}
+{% set _csrf = csrf_token|default('') %}
+<html lang="ru" data-theme="{{ _ui.theme|default('dark') }}" data-compact="{{ _ui.compact|default('off') }}" data-animations="{{ _ui.animations|default('on') }}">
 <head>
 <meta charset="UTF-8">
 <title>StudentHubik</title>
@@ -7,12 +9,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <script>
-const APP_CSRF_TOKEN = {{ csrf_token|tojson }};
+const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 (function() {
   try {
-    var theme = localStorage.getItem('studenthubik_theme') || {{ ui_settings.theme|tojson }};
-    var compact = localStorage.getItem('studenthubik_compact') || {{ ui_settings.compact|tojson }};
-    var animations = localStorage.getItem('studenthubik_animations') || {{ ui_settings.animations|tojson }};
+    var theme = localStorage.getItem('studenthubik_theme') || {{ _ui.theme|default('dark')|tojson }};
+    var compact = localStorage.getItem('studenthubik_compact') || {{ _ui.compact|default('off')|tojson }};
+    var animations = localStorage.getItem('studenthubik_animations') || {{ _ui.animations|default('on')|tojson }};
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.setAttribute('data-compact', compact);
     document.documentElement.setAttribute('data-animations', animations);
@@ -80,6 +82,7 @@ const APP_CSRF_TOKEN = {{ csrf_token|tojson }};
     const method = (form.getAttribute('method') || 'GET').toUpperCase();
     if (method !== 'POST') return;
     if (form.querySelector('input[name="csrf_token"]')) return;
+    if (!APP_CSRF_TOKEN) return;
     const input = document.createElement('input');
     input.type = 'hidden';
     input.name = 'csrf_token';
