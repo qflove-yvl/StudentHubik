@@ -10,7 +10,7 @@
             <p>Создайте аккаунт в StudentHubik</p>
         </div>
 
-        <form method="POST" class="auth-form" id="register-form">
+        <form method="POST" id="register-form">
             <input type="text" name="name" class="input-field" placeholder="Имя" required>
             <input type="email" name="email" class="input-field" placeholder="Email" required>
             <input type="password" name="password" class="input-field" placeholder="Пароль" required>
@@ -22,12 +22,7 @@
                 <option value="teacher">Преподаватель</option>
             </select>
 
-            <select name="group_id" id="group-select" class="input-field hidden">
-                <option value="">Группа (необязательно)</option>
-                {% for group in groups %}
-                    <option value="{{ group.id }}">{{ group.name }}</option>
-                {% endfor %}
-            </select>
+            <input type="text" name="group_name" id="group-name" class="input-field hidden" placeholder="Группа (например ИС24-01/2)">
 
             <button type="submit" class="btn auth-btn">Зарегистрироваться</button>
         </form>
@@ -42,14 +37,16 @@
 
 <script>
 const roleSelect = document.getElementById('role-select');
-const groupSelect = document.getElementById('group-select');
+const groupInput = document.getElementById('group-name');
 
 roleSelect.addEventListener('change', () => {
     if (roleSelect.value === 'student') {
-        groupSelect.classList.remove('hidden');
+        groupInput.classList.remove('hidden');
+        groupInput.required = true;
     } else {
-        groupSelect.classList.add('hidden');
-        groupSelect.value = '';
+        groupInput.classList.add('hidden');
+        groupInput.required = false;
+        groupInput.value = '';
     }
 });
 </script>

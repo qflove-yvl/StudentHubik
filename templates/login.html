@@ -6,8 +6,8 @@
 
         <div class="auth-header">
             <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik">
-            <h1>StudentHubik</h1>
-            <p>Вход в систему</p>
+            <h1>Вход</h1>
+            <p>Выберите роль и войдите в систему</p>
         </div>
 
         <form method="POST">
@@ -16,6 +16,7 @@
             <select name="role" class="input-field" required>
                 <option value="student" {% if role == 'student' %}selected{% endif %}>Студент</option>
                 <option value="teacher" {% if role == 'teacher' %}selected{% endif %}>Преподаватель</option>
+                <option value="admin" {% if role == 'admin' %}selected{% endif %}>Админ</option>
             </select>
             <button type="submit" class="btn auth-btn">Войти</button>
         </form>

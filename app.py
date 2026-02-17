@@ -7,12 +7,16 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import csv
 import io
 import os
+import re
+import socket
 
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///site.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key')
+app.config['ADMIN_EMAIL'] = os.getenv('ADMIN_EMAIL', 'admin@studenthubik.local').lower()
+app.config['ADMIN_PASSWORD'] = os.getenv('ADMIN_PASSWORD', 'admin12345')
 
 
 db = SQLAlchemy(app)
@@ -68,6 +72,28 @@ def ensure_default_groups():
         db.session.commit()
 
 
+def ensure_admin_user():
+    admin_email = app.config['ADMIN_EMAIL']
+    existing_admin = User.query.filter_by(email=admin_email).first()
+    if existing_admin:
+        if existing_admin.role != 'admin':
+            existing_admin.role = 'admin'
+            existing_admin.is_verified = True
+            db.session.commit()
+        return
+
+    db.session.add(
+        User(
+            name='Администратор',
+            email=admin_email,
+            password=generate_password_hash(app.config['ADMIN_PASSWORD']),
+            role='admin',
+            is_verified=True
+        )
+    )
+    db.session.commit()
+
+
 def ensure_teacher_subjects(teacher_id):
     defaults = ['Математика', 'Информатика', 'Английский']
     existing = {
@@ -85,6 +111,23 @@ def ensure_teacher_subjects(teacher_id):
         db.session.commit()
 
 
+def normalize_group_name(group_name):
+    return group_name.strip().upper()
+
+
+def email_looks_real(email):
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        return False
+
+    domain = email.split('@')[-1]
+    try:
+        socket.getaddrinfo(domain, None)
+    except socket.gaierror:
+        return False
+
+    return True
+
+
 @app.before_request
 def initialize_database():
     if app.config.get('DB_INITIALIZED'):
@@ -92,6 +135,7 @@ def initialize_database():
 
     db.create_all()
     ensure_default_groups()
+    ensure_admin_user()
     app.config['DB_INITIALIZED'] = True
 
 
@@ -107,18 +151,20 @@ def index():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    groups = Group.query.order_by(Group.name).all()
-
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
         confirm_password = request.form.get('confirm_password', '')
         role = request.form.get('role')
-        group_id = request.form.get('group_id')
+        group_name = request.form.get('group_name', '').strip()
 
         if not name or not email or not password or not role:
             flash('Заполните все обязательные поля')
+            return redirect(url_for('register'))
+
+        if not email_looks_real(email):
+            flash('Email выглядит некорректно или домен недоступен')
             return redirect(url_for('register'))
 
         if password != confirm_password:
@@ -134,31 +180,39 @@ def register():
             return redirect(url_for('register'))
 
         selected_group_id = None
-        if role == 'student' and group_id:
-            selected_group = Group.query.get(group_id)
-            if not selected_group:
-                flash('Выбрана некорректная группа')
+        if role == 'student':
+            if not group_name:
+                flash('Для студента нужно указать группу')
                 return redirect(url_for('register'))
-            selected_group_id = selected_group.id
+
+            normalized_group = normalize_group_name(group_name)
+            group = Group.query.filter_by(name=normalized_group).first()
+            if not group:
+                group = Group(name=normalized_group)
+                db.session.add(group)
+                db.session.flush()
+            selected_group_id = group.id
 
         new_user = User(
             name=name,
             email=email,
             password=generate_password_hash(password),
             role=role,
-            group_id=selected_group_id
+            group_id=selected_group_id,
+            is_verified=(role == 'student')
         )
 
         db.session.add(new_user)
         db.session.commit()
 
         if role == 'teacher':
-            ensure_teacher_subjects(new_user.id)
+            flash('Заявка преподавателя отправлена. Дождитесь одобрения администратора.')
+        else:
+            flash('Регистрация успешна. Теперь войдите в аккаунт.')
 
-        flash('Регистрация успешна. Теперь войдите в аккаунт.')
         return redirect(url_for('login', role=role))
 
-    return render_template('register.html', groups=groups)
+    return render_template('register.html')
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -173,18 +227,24 @@ def login():
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password, password):
-            if selected_role not in {'student', 'teacher'}:
+            if selected_role not in {'student', 'teacher', 'admin'}:
                 selected_role = user.role
 
             if user.role != selected_role:
                 flash('Вы пытаетесь войти не в ту роль')
                 return redirect(url_for('login', role=user.role))
 
+            if user.role == 'teacher' and not user.is_verified:
+                flash('Доступ преподавателя ещё не одобрен администратором')
+                return redirect(url_for('login', role='teacher'))
+
             login_user(user)
 
             if user.role == 'teacher':
                 ensure_teacher_subjects(user.id)
                 return redirect(url_for('teacher_dashboard'))
+            if user.role == 'admin':
+                return redirect(url_for('admin_dashboard'))
             return redirect(url_for('student_dashboard'))
 
         flash('Неверный email или пароль')
@@ -201,6 +261,9 @@ def dashboard():
     if current_user.role == 'teacher':
         return redirect(url_for('teacher_dashboard'))
 
+    if current_user.role == 'admin':
+        return redirect(url_for('admin_dashboard'))
+
     return redirect(url_for('index'))
 
 
@@ -209,6 +272,26 @@ def dashboard():
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
+
+@app.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        telegram = request.form.get('telegram', '').strip()
+
+        if not name:
+            flash('Имя не может быть пустым')
+            return redirect(url_for('profile'))
+
+        current_user.name = name
+        current_user.telegram = telegram
+        db.session.commit()
+        flash('Профиль обновлён')
+        return redirect(url_for('profile'))
+
+    return render_template('profile.html')
 
 
 @app.route('/student')
@@ -366,6 +449,59 @@ def export_teacher_grades():
         mimetype='text/csv',
         headers={'Content-Disposition': 'attachment; filename=teacher_grades.csv'}
     )
+
+
+@app.route('/admin')
+@login_required
+def admin_dashboard():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    pending_teachers = User.query.filter_by(role='teacher', is_verified=False).order_by(User.id.desc()).all()
+    approved_teachers = User.query.filter_by(role='teacher', is_verified=True).order_by(User.id.desc()).all()
+    students_count = User.query.filter_by(role='student').count()
+
+    return render_template(
+        'admin_dashboard.html',
+        pending_teachers=pending_teachers,
+        approved_teachers=approved_teachers,
+        students_count=students_count
+    )
+
+
+@app.route('/admin/teacher/<int:user_id>/approve', methods=['POST'])
+@login_required
+def approve_teacher(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    teacher = User.query.filter_by(id=user_id, role='teacher').first()
+    if not teacher:
+        flash('Преподаватель не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    teacher.is_verified = True
+    db.session.commit()
+    ensure_teacher_subjects(teacher.id)
+    flash(f'Преподаватель {teacher.name} одобрен')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/teacher/<int:user_id>/reject', methods=['POST'])
+@login_required
+def reject_teacher(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    teacher = User.query.filter_by(id=user_id, role='teacher').first()
+    if not teacher:
+        flash('Преподаватель не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    db.session.delete(teacher)
+    db.session.commit()
+    flash('Заявка преподавателя отклонена')
+    return redirect(url_for('admin_dashboard'))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="page-title">Профиль пользователя</h1>
+
+<section class="card" style="max-width:640px;">
+    <form method="POST">
+        <label class="field-label" for="name">Имя</label>
+        <input id="name" type="text" name="name" class="input-field" value="{{ current_user.name }}" required>
+
+        <label class="field-label" for="telegram">Telegram (необязательно)</label>
+        <input id="telegram" type="text" name="telegram" class="input-field" value="{{ current_user.telegram or '' }}" placeholder="@username">
+
+        <button type="submit" class="btn">Сохранить профиль</button>
+    </form>
+</section>
+
+{% endblock %}

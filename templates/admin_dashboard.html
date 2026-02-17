@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="page-title">Админ-панель</h1>
+
+<div class="card-grid">
+    <div class="card">
+        <div class="card-title">Заявок преподавателей</div>
+        <div class="card-value">{{ pending_teachers|length }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Одобренных преподавателей</div>
+        <div class="card-value">{{ approved_teachers|length }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Студентов</div>
+        <div class="card-value">{{ students_count }}</div>
+    </div>
+</div>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Заявки на роль преподавателя</h2>
+    {% if pending_teachers %}
+        <div class="table-wrap">
+            <table class="grade-table">
+                <thead>
+                    <tr>
+                        <th>Имя</th>
+                        <th>Email</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for teacher in pending_teachers %}
+                    <tr>
+                        <td>{{ teacher.name }}</td>
+                        <td>{{ teacher.email }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('approve_teacher', user_id=teacher.id) }}" style="display:inline-block;">
+                                <button class="btn" type="submit">Одобрить</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('reject_teacher', user_id=teacher.id) }}" style="display:inline-block;margin-left:8px;">
+                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted-text">Новых заявок нет.</p>
+    {% endif %}
+</section>
+
+{% endblock %}

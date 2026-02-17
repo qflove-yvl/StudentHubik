@@ -1,26 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="max-width:900px;margin:auto;text-align:center;margin-top:80px;">
+<div style="max-width:950px;margin:auto;text-align:center;margin-top:40px;">
 
     <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo home-main-logo" alt="StudentHubik">
 
     <h1 class="page-title">Добро пожаловать в StudentHubik</h1>
-    <p style="opacity:0.7;margin-bottom:50px;font-size:18px;">
-        Платформа управления обучением нового поколения
+    <p style="opacity:0.78;margin-bottom:42px;font-size:18px;">
+        Современная бесплатная платформа для студентов, преподавателей и админа
     </p>
 
     <div class="card-grid">
         <div class="card">
             <div class="card-title">Я студент</div>
-            <div class="card-value"><img src="{{ url_for('static', filename='logo.svg') }}" class="mini-role-logo" alt="Студент"></div>
+            <div class="card-value"><span class="role-sticker student-sticker">🎓</span></div>
             <br>
             <a href="{{ url_for('login', role='student') }}" class="btn">Войти как студент</a>
         </div>
 
         <div class="card">
             <div class="card-title">Я преподаватель</div>
-            <div class="card-value"><img src="{{ url_for('static', filename='logo.svg') }}" class="mini-role-logo" alt="Преподаватель"></div>
+            <div class="card-value"><span class="role-sticker teacher-sticker">👨‍🏫</span></div>
             <br>
             <a href="{{ url_for('login', role='teacher') }}" class="btn">Войти как преподаватель</a>
         </div>

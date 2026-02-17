@@ -38,12 +38,15 @@
     {% if current_user.is_authenticated %}
     <aside class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="nav-link">Панель</a>
+        <a href="{{ url_for('profile') }}" class="nav-link">Профиль</a>
         {% if current_user.role == 'student' %}
             <a href="{{ url_for('student_dashboard') }}" class="nav-link">Мои оценки</a>
             <a href="{{ url_for('export_student_grades') }}" class="nav-link">Экспорт оценок</a>
         {% elif current_user.role == 'teacher' %}
             <a href="{{ url_for('teacher_dashboard') }}" class="nav-link">Кабинет преподавателя</a>
             <a href="{{ url_for('export_teacher_grades') }}" class="nav-link">Экспорт оценок</a>
+        {% elif current_user.role == 'admin' %}
+            <a href="{{ url_for('admin_dashboard') }}" class="nav-link">Админ-панель</a>
         {% endif %}
     </aside>
     {% endif %}
