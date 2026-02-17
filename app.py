@@ -8,6 +8,9 @@ import csv
 import io
 import os
 import re
+from datetime import datetime
+
+from sqlalchemy import func, inspect, text
 
 
 app = Flask(__name__)
@@ -59,6 +62,8 @@ class Grade(db.Model):
     student_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'))
     grade = db.Column(db.Integer)
+    comment = db.Column(db.String(300), default='')
+    graded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     student = db.relationship('User', foreign_keys=[student_id])
     subject = db.relationship('Subject')
@@ -68,6 +73,7 @@ class AuditLog(db.Model):
     actor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     action = db.Column(db.String(120), nullable=False)
     details = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     actor = db.relationship('User')
 
@@ -119,6 +125,24 @@ def ensure_teacher_subjects(teacher_id):
         db.session.commit()
 
 
+def ensure_runtime_columns():
+    inspector = inspect(db.engine)
+
+    grade_columns = {column['name'] for column in inspector.get_columns('grade')}
+    if 'comment' not in grade_columns:
+        db.session.execute(text('ALTER TABLE grade ADD COLUMN comment VARCHAR(300) DEFAULT ""'))
+    if 'graded_at' not in grade_columns:
+        db.session.execute(text('ALTER TABLE grade ADD COLUMN graded_at DATETIME'))
+        db.session.execute(text('UPDATE grade SET graded_at = CURRENT_TIMESTAMP WHERE graded_at IS NULL'))
+
+    audit_columns = {column['name'] for column in inspector.get_columns('audit_log')}
+    if 'created_at' not in audit_columns:
+        db.session.execute(text('ALTER TABLE audit_log ADD COLUMN created_at DATETIME'))
+        db.session.execute(text('UPDATE audit_log SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL'))
+
+    db.session.commit()
+
+
 def normalize_group_name(group_name):
     return group_name.strip().upper()
 
@@ -127,10 +151,11 @@ def email_looks_valid(email):
     return re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email) is not None
 
 
-def log_audit(action, details=''):
+def log_audit(action, details='', should_commit=True):
     actor_id = current_user.id if current_user.is_authenticated else None
-    db.session.add(AuditLog(actor_id=actor_id, action=action, details=details[:300]))
-    db.session.commit()
+    db.session.add(AuditLog(actor_id=actor_id, action=action, details=details[:300], created_at=datetime.utcnow()))
+    if should_commit:
+        db.session.commit()
 
 
 def password_matches(password_hash, password):
@@ -151,6 +176,7 @@ def initialize_database():
         return
 
     db.create_all()
+    ensure_runtime_columns()
     ensure_default_groups()
     ensure_admin_user()
     app.config['DB_INITIALIZED'] = True
@@ -379,19 +405,42 @@ def teacher_dashboard():
         return redirect(url_for('student_dashboard'))
 
     students = User.query.filter_by(role='student', is_verified=True).order_by(User.name).all()
+    groups_by_id = {group.id: group.name for group in Group.query.all()}
     subjects = Subject.query.filter_by(teacher_id=current_user.id).order_by(Subject.name).all()
+    action = request.form.get('action')
 
-    if request.method == 'POST':
+    if request.method == 'POST' and action in {'create_or_update', 'delete'}:
         student_id = request.form.get('student_id')
         subject_id = request.form.get('subject_id')
         grade_value = request.form.get('value')
+        comment = request.form.get('comment', '').strip()
 
-        if not student_id or not subject_id or not grade_value:
-            flash('Заполните все поля для выставления оценки')
+        if not student_id or not subject_id:
+            flash('Выберите студента и предмет')
             return redirect(url_for('teacher_dashboard'))
 
         student = User.query.filter_by(id=student_id, role='student', is_verified=True).first()
         subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
+
+        if not student or not subject:
+            flash('Выбраны некорректные студент или предмет')
+            return redirect(url_for('teacher_dashboard'))
+
+        existing_grade = Grade.query.filter_by(student_id=student.id, subject_id=subject.id).first()
+        if action == 'delete':
+            if not existing_grade:
+                flash('Для выбранного студента и предмета оценка не найдена')
+                return redirect(url_for('teacher_dashboard'))
+
+            db.session.delete(existing_grade)
+            db.session.commit()
+            log_audit('delete_grade', f'student={student.id}, subject={subject.id}')
+            flash(f'Оценка удалена: {student.name} / {subject.name}')
+            return redirect(url_for('teacher_dashboard'))
+
+        if not grade_value:
+            flash('Укажите оценку от 1 до 5')
+            return redirect(url_for('teacher_dashboard'))
 
         try:
             numeric_grade = int(grade_value)
@@ -403,17 +452,20 @@ def teacher_dashboard():
             flash('Оценка должна быть от 1 до 5')
             return redirect(url_for('teacher_dashboard'))
 
-        if not student or not subject:
-            flash('Выбраны некорректные студент или предмет')
-            return redirect(url_for('teacher_dashboard'))
-
-        existing_grade = Grade.query.filter_by(student_id=student.id, subject_id=subject.id).first()
         if existing_grade:
             existing_grade.grade = numeric_grade
+            existing_grade.comment = comment[:300]
+            existing_grade.graded_at = datetime.utcnow()
             log_audit('update_grade', f'student={student.id}, subject={subject.id}, grade={numeric_grade}')
             flash(f'Оценка обновлена: {student.name} / {subject.name} = {numeric_grade}')
         else:
-            new_grade = Grade(student_id=student.id, subject_id=subject.id, grade=numeric_grade)
+            new_grade = Grade(
+                student_id=student.id,
+                subject_id=subject.id,
+                grade=numeric_grade,
+                comment=comment[:300],
+                graded_at=datetime.utcnow()
+            )
             db.session.add(new_grade)
             log_audit('create_grade', f'student={student.id}, subject={subject.id}, grade={numeric_grade}')
             flash(f'Оценка выставлена: {student.name} / {subject.name} = {numeric_grade}')
@@ -429,11 +481,21 @@ def teacher_dashboard():
         .all()
     )
 
+    subject_averages = dict(
+        db.session.query(Subject.id, func.round(func.avg(Grade.grade), 2))
+        .outerjoin(Grade, Grade.subject_id == Subject.id)
+        .filter(Subject.teacher_id == current_user.id)
+        .group_by(Subject.id)
+        .all()
+    )
+
     return render_template(
         'teacher_dashboard.html',
         students=students,
         subjects=subjects,
-        recent_grades=recent_grades
+        recent_grades=recent_grades,
+        groups_by_id=groups_by_id,
+        subject_averages=subject_averages
     )
 
 
@@ -469,11 +531,35 @@ def admin_dashboard():
     if current_user.role != 'admin':
         return redirect(url_for('dashboard'))
 
-    pending_teachers = User.query.filter_by(role='teacher', is_verified=False).order_by(User.id.desc()).all()
-    pending_students = User.query.filter_by(role='student', is_verified=False).order_by(User.id.desc()).all()
+    query = request.args.get('q', '').strip()
+    role_filter = request.args.get('role', 'all')
+    status_filter = request.args.get('status', 'pending')
+    group_filter = request.args.get('group_id', 'all')
 
-    approved_teachers = User.query.filter_by(role='teacher', is_verified=True).order_by(User.id.desc()).all()
-    approved_students = User.query.filter_by(role='student', is_verified=True).order_by(User.id.desc()).all()
+    users_query = User.query.filter(User.role.in_(['student', 'teacher']))
+    if query:
+        users_query = users_query.filter((User.name.ilike(f'%{query}%')) | (User.email.ilike(f'%{query}%')))
+    if role_filter in {'student', 'teacher'}:
+        users_query = users_query.filter(User.role == role_filter)
+    if status_filter == 'pending':
+        users_query = users_query.filter(User.is_verified.is_(False))
+    elif status_filter == 'approved':
+        users_query = users_query.filter(User.is_verified.is_(True))
+
+    if group_filter != 'all':
+        try:
+            group_id = int(group_filter)
+            users_query = users_query.filter(User.group_id == group_id)
+        except ValueError:
+            pass
+
+    filtered_users = users_query.order_by(User.id.desc()).all()
+
+    pending_teachers = [u for u in filtered_users if u.role == 'teacher' and not u.is_verified]
+    pending_students = [u for u in filtered_users if u.role == 'student' and not u.is_verified]
+
+    approved_teachers = [u for u in filtered_users if u.role == 'teacher' and u.is_verified]
+    approved_students = [u for u in filtered_users if u.role == 'student' and u.is_verified]
 
     all_groups = Group.query.order_by(Group.name).all()
     all_subjects = Subject.query.order_by(Subject.name).all()
@@ -485,10 +571,74 @@ def admin_dashboard():
         pending_students=pending_students,
         approved_teachers=approved_teachers,
         approved_students=approved_students,
+        groups_by_id={group.id: group.name for group in all_groups},
+        query=query,
+        role_filter=role_filter,
+        status_filter=status_filter,
+        group_filter=group_filter,
         all_groups=all_groups,
         all_subjects=all_subjects,
         recent_audit=recent_audit
     )
+
+
+@app.route('/admin/users/bulk-action', methods=['POST'])
+@login_required
+def admin_bulk_user_action():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    redirect_params = {
+        'q': request.form.get('q', ''),
+        'role': request.form.get('role', 'all'),
+        'status': request.form.get('status', 'pending'),
+        'group_id': request.form.get('group_id', 'all')
+    }
+
+    action = request.form.get('bulk_action')
+    selected_ids = request.form.getlist('selected_user_ids')
+    if action not in {'approve', 'reject'}:
+        flash('Некорректное массовое действие')
+        return redirect(url_for('admin_dashboard', **redirect_params))
+
+    valid_ids = []
+    for user_id in selected_ids:
+        try:
+            valid_ids.append(int(user_id))
+        except ValueError:
+            continue
+
+    if not valid_ids:
+        flash('Выберите хотя бы одну заявку')
+        return redirect(url_for('admin_dashboard', **redirect_params))
+
+    users = User.query.filter(User.id.in_(valid_ids), User.role.in_(['student', 'teacher'])).all()
+    processed = 0
+
+    if action == 'approve':
+        for user in users:
+            user.is_verified = True
+            processed += 1
+            log_audit('approve_user_bulk', f'id={user.id}, role={user.role}', should_commit=False)
+        db.session.commit()
+        flash(f'Одобрено заявок: {processed}')
+        return redirect(url_for('admin_dashboard', **redirect_params))
+
+    for user in users:
+        Grade.query.filter_by(student_id=user.id).delete()
+        if user.role == 'teacher':
+            teacher_subject_ids = [s.id for s in Subject.query.filter_by(teacher_id=user.id).all()]
+            if teacher_subject_ids:
+                Grade.query.filter(Grade.subject_id.in_(teacher_subject_ids)).delete(synchronize_session=False)
+                Subject.query.filter_by(teacher_id=user.id).delete()
+
+        db.session.delete(user)
+        processed += 1
+        log_audit('reject_user_bulk', f'id={user.id}, role={user.role}', should_commit=False)
+
+    db.session.commit()
+    flash(f'Отклонено и удалено заявок: {processed}')
+    return redirect(url_for('admin_dashboard', **redirect_params))
 
 
 @app.route('/admin/user/<int:user_id>/approve', methods=['POST'])
@@ -507,6 +657,51 @@ def approve_user(user_id):
 
     log_audit('approve_user', f'id={user.id}, role={user.role}')
     flash(f'Пользователь {user.name} одобрен')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/user/action', methods=['POST'])
+@login_required
+def admin_user_action():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    user_id = request.form.get('user_id')
+    action = request.form.get('action')
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        flash('Некорректный пользователь')
+        return redirect(url_for('admin_dashboard'))
+
+    user = User.query.filter(User.id == user_id, User.role.in_(['student', 'teacher'])).first()
+    if not user:
+        flash('Пользователь не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    if action == 'approve':
+        user.is_verified = True
+        db.session.commit()
+        log_audit('approve_user', f'id={user.id}, role={user.role}')
+        flash(f'Пользователь {user.name} одобрен')
+        return redirect(url_for('admin_dashboard'))
+
+    if action == 'reject':
+        Grade.query.filter_by(student_id=user.id).delete()
+        if user.role == 'teacher':
+            teacher_subject_ids = [s.id for s in Subject.query.filter_by(teacher_id=user.id).all()]
+            if teacher_subject_ids:
+                Grade.query.filter(Grade.subject_id.in_(teacher_subject_ids)).delete(synchronize_session=False)
+                Subject.query.filter_by(teacher_id=user.id).delete()
+
+        db.session.delete(user)
+        db.session.commit()
+        log_audit('reject_user', f'id={user_id}')
+        flash('Заявка отклонена и аккаунт удалён')
+        return redirect(url_for('admin_dashboard'))
+
+    flash('Некорректное действие')
     return redirect(url_for('admin_dashboard'))
 
 
