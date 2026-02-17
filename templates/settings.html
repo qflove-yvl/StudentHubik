@@ -6,26 +6,30 @@
 <div class="panel-grid">
     <section class="card form-card">
         <h2>Внешний вид</h2>
-        <label class="field-label" for="theme-select">Тема</label>
-        <select id="theme-select" class="input-field">
-            <option value="dark">Тёмная</option>
-            <option value="light">Светлая</option>
-        </select>
+        <form method="POST" id="settings-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
-        <label class="field-label" for="compact-select">Компактный режим</label>
-        <select id="compact-select" class="input-field">
-            <option value="off">Обычный</option>
-            <option value="on">Компактный</option>
-        </select>
+            <label class="field-label" for="theme-select">Тема</label>
+            <select id="theme-select" name="theme" class="input-field">
+                <option value="dark" {% if ui_settings.theme == 'dark' %}selected{% endif %}>Тёмная</option>
+                <option value="light" {% if ui_settings.theme == 'light' %}selected{% endif %}>Светлая</option>
+            </select>
 
-        <label class="field-label" for="animations-select">Анимации</label>
-        <select id="animations-select" class="input-field">
-            <option value="on">Включены</option>
-            <option value="off">Выключены</option>
-        </select>
+            <label class="field-label" for="compact-select">Компактный режим</label>
+            <select id="compact-select" name="compact_mode" class="input-field">
+                <option value="off" {% if ui_settings.compact == 'off' %}selected{% endif %}>Обычный</option>
+                <option value="on" {% if ui_settings.compact == 'on' %}selected{% endif %}>Компактный</option>
+            </select>
 
-        <button id="save-ui-settings" class="btn" type="button">Сохранить настройки</button>
-        <p class="muted-text hint-text">Настройки применяются сразу и сохраняются в браузере.</p>
+            <label class="field-label" for="animations-select">Анимации</label>
+            <select id="animations-select" name="animations_enabled" class="input-field">
+                <option value="on" {% if ui_settings.animations == 'on' %}selected{% endif %}>Включены</option>
+                <option value="off" {% if ui_settings.animations == 'off' %}selected{% endif %}>Выключены</option>
+            </select>
+
+            <button id="save-ui-settings" class="btn" type="submit">Сохранить настройки</button>
+            <p class="muted-text hint-text">Настройки сохраняются в аккаунте и применяются на всех ваших устройствах.</p>
+        </form>
     </section>
 
     <section class="card list-card">
@@ -50,21 +54,8 @@
     const themeSelect = document.getElementById('theme-select');
     const compactSelect = document.getElementById('compact-select');
     const animationsSelect = document.getElementById('animations-select');
-    const saveBtn = document.getElementById('save-ui-settings');
 
-    if (!themeSelect || !compactSelect || !animationsSelect || !saveBtn) return;
-
-    const loadValue = (key, fallback) => {
-        try {
-            return localStorage.getItem(key) || fallback;
-        } catch (e) {
-            return fallback;
-        }
-    };
-
-    themeSelect.value = loadValue('studenthubik_theme', 'dark');
-    compactSelect.value = loadValue('studenthubik_compact', 'off');
-    animationsSelect.value = loadValue('studenthubik_animations', 'on');
+    if (!themeSelect || !compactSelect || !animationsSelect) return;
 
     const apply = () => {
         root.setAttribute('data-theme', themeSelect.value);
@@ -72,19 +63,15 @@
         root.setAttribute('data-animations', animationsSelect.value);
     };
 
-    apply();
-
-    saveBtn.addEventListener('click', () => {
-        try {
-            localStorage.setItem('studenthubik_theme', themeSelect.value);
-            localStorage.setItem('studenthubik_compact', compactSelect.value);
-            localStorage.setItem('studenthubik_animations', animationsSelect.value);
+    [themeSelect, compactSelect, animationsSelect].forEach((el) => {
+        el.addEventListener('change', () => {
             apply();
-            saveBtn.textContent = 'Сохранено ✓';
-            setTimeout(() => { saveBtn.textContent = 'Сохранить настройки'; }, 1200);
-        } catch (e) {
-            saveBtn.textContent = 'Не удалось сохранить';
-        }
+            try {
+                localStorage.setItem('studenthubik_theme', themeSelect.value);
+                localStorage.setItem('studenthubik_compact', compactSelect.value);
+                localStorage.setItem('studenthubik_animations', animationsSelect.value);
+            } catch (e) {}
+        });
     });
 })();
 </script>

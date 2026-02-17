@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="dark" data-compact="off" data-animations="on">
+<html lang="ru" data-theme="{{ ui_settings.theme }}" data-compact="{{ ui_settings.compact }}" data-animations="{{ ui_settings.animations }}">
 <head>
 <meta charset="UTF-8">
 <title>StudentHubik</title>
@@ -7,11 +7,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <script>
+const APP_CSRF_TOKEN = {{ csrf_token|tojson }};
 (function() {
   try {
-    var theme = localStorage.getItem('studenthubik_theme') || 'dark';
-    var compact = localStorage.getItem('studenthubik_compact') || 'off';
-    var animations = localStorage.getItem('studenthubik_animations') || 'on';
+    var theme = localStorage.getItem('studenthubik_theme') || {{ ui_settings.theme|tojson }};
+    var compact = localStorage.getItem('studenthubik_compact') || {{ ui_settings.compact|tojson }};
+    var animations = localStorage.getItem('studenthubik_animations') || {{ ui_settings.animations|tojson }};
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.setAttribute('data-compact', compact);
     document.documentElement.setAttribute('data-animations', animations);
@@ -70,6 +71,23 @@
     </main>
 
 </div>
+
+
+<script>
+(function () {
+  const forms = document.querySelectorAll('form');
+  forms.forEach((form) => {
+    const method = (form.getAttribute('method') || 'GET').toUpperCase();
+    if (method !== 'POST') return;
+    if (form.querySelector('input[name="csrf_token"]')) return;
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'csrf_token';
+    input.value = APP_CSRF_TOKEN;
+    form.appendChild(input);
+  });
+})();
+</script>
 
 </body>
 </html>

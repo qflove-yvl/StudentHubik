@@ -51,6 +51,7 @@
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Управление группами</h2>
     <form method="POST" action="{{ url_for('admin_add_group') }}" style="margin-bottom:14px;max-width:500px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="text" name="group_name" class="input-field" placeholder="Новая группа (например ИС24-01/2)" required>
         <button class="btn" type="submit">Добавить группу</button>
     </form>
@@ -65,6 +66,7 @@
                         <td>{{ group.name }}</td>
                         <td>
                             <form method="POST" action="{{ url_for('admin_delete_group', group_id=group.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                 <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>
                             </form>
                         </td>
@@ -80,6 +82,7 @@
     <h2 style="margin-bottom:14px;">Заявки студентов</h2>
     {% if pending_students %}
         <form method="POST" action="{{ url_for('admin_bulk_user_action') }}" style="margin-bottom: 12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="q" value="{{ persist.q }}">
             <input type="hidden" name="role" value="{{ persist.role }}">
             <input type="hidden" name="status" value="{{ persist.status }}">
@@ -113,6 +116,7 @@
     <h2 style="margin-bottom:14px;">Заявки преподавателей</h2>
     {% if pending_teachers %}
         <form method="POST" action="{{ url_for('admin_bulk_user_action') }}" style="margin-bottom: 12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="q" value="{{ persist.q }}">
             <input type="hidden" name="role" value="{{ persist.role }}">
             <input type="hidden" name="status" value="{{ persist.status }}">
@@ -147,6 +151,7 @@
         <div class="card" style="margin-bottom:14px;padding:18px;">
             <h3 style="margin-bottom:8px;">{{ teacher.name }} ({{ teacher.email }})</h3>
             <form method="POST" action="{{ url_for('admin_add_subject_for_teacher', teacher_id=teacher.id) }}" style="max-width:500px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="text" name="subject_name" class="input-field" placeholder="Добавить предмет преподавателю" required>
                 <button class="btn" type="submit">Добавить предмет</button>
             </form>
@@ -164,6 +169,7 @@
                         <td>{{ subject.teacher_id }}</td>
                         <td>
                             <form method="POST" action="{{ url_for('admin_delete_subject', subject_id=subject.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                 <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить предмет</button>
                             </form>
                         </td>
@@ -189,6 +195,7 @@
                         <td>{{ groups_by_id.get(student.group_id, '—') if student.group_id else '—' }}</td>
                         <td>
                             <form method="POST" action="{{ url_for('admin_delete_student', user_id=student.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                 <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить аккаунт</button>
                             </form>
                         </td>

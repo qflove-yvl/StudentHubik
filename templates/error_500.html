@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card" style="max-width:720px;">
+  <h1 class="page-title">Внутренняя ошибка (500)</h1>
+  <p class="muted-text">Мы уже записали ошибку в журнал. Попробуйте обновить страницу чуть позже.</p>
+  <div style="margin-top:14px;"><a class="btn" href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('index') }}">Вернуться</a></div>
+</section>
+{% endblock %}

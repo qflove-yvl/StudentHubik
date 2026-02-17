@@ -5,6 +5,7 @@
 
 <section class="card" style="max-width:640px;">
     <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label class="field-label" for="name">Имя</label>
         <input id="name" type="text" name="name" class="input-field" value="{{ current_user.name }}" required>
 

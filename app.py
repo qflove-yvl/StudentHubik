@@ -1,5 +1,5 @@
-from flask import flash
-from flask import Flask, render_template, redirect, url_for, request
+from flask import abort, flash
+from flask import Flask, render_template, redirect, url_for, request, session
 from flask import Response
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -8,7 +8,10 @@ import csv
 import io
 import os
 import re
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
+import logging
+from logging.handlers import RotatingFileHandler
 
 from sqlalchemy import func, inspect, text
 
@@ -19,6 +22,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key')
 app.config['ADMIN_EMAIL'] = os.getenv('ADMIN_EMAIL', 'admin@studenthubik.local').lower()
 app.config['ADMIN_PASSWORD'] = os.getenv('ADMIN_PASSWORD', 'admin12345')
+app.config['LOGIN_MAX_ATTEMPTS'] = int(os.getenv('LOGIN_MAX_ATTEMPTS', '5'))
+app.config['LOGIN_BLOCK_MINUTES'] = int(os.getenv('LOGIN_BLOCK_MINUTES', '10'))
 
 
 db = SQLAlchemy(app)
@@ -36,6 +41,9 @@ class User(UserMixin, db.Model):
 
     is_verified = db.Column(db.Boolean, default=False)
     telegram = db.Column(db.String(100))
+    theme = db.Column(db.String(10), default='dark')
+    compact_mode = db.Column(db.Boolean, default=False)
+    animations_enabled = db.Column(db.Boolean, default=True)
 
 
 class VerificationCode(db.Model):
@@ -140,6 +148,17 @@ def ensure_runtime_columns():
         db.session.execute(text('ALTER TABLE audit_log ADD COLUMN created_at DATETIME'))
         db.session.execute(text('UPDATE audit_log SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL'))
 
+    user_columns = {column['name'] for column in inspector.get_columns('user')}
+    if 'theme' not in user_columns:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN theme VARCHAR(10) DEFAULT "dark"'))
+        db.session.execute(text("UPDATE user SET theme = 'dark' WHERE theme IS NULL OR theme = ''"))
+    if 'compact_mode' not in user_columns:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN compact_mode BOOLEAN DEFAULT 0'))
+        db.session.execute(text('UPDATE user SET compact_mode = 0 WHERE compact_mode IS NULL'))
+    if 'animations_enabled' not in user_columns:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN animations_enabled BOOLEAN DEFAULT 1'))
+        db.session.execute(text('UPDATE user SET animations_enabled = 1 WHERE animations_enabled IS NULL'))
+
     db.session.commit()
 
 
@@ -170,6 +189,44 @@ def full_name_looks_valid(full_name):
     return len(parts) >= 3
 
 
+def get_or_create_csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_urlsafe(32)
+    return session['csrf_token']
+
+
+def is_login_rate_limited(identifier):
+    attempts = app.config.setdefault('LOGIN_ATTEMPTS', {})
+    state = attempts.get(identifier, {'count': 0, 'blocked_until': None})
+    blocked_until = state.get('blocked_until')
+    now = datetime.utcnow()
+
+    if blocked_until and blocked_until > now:
+        return True, int((blocked_until - now).total_seconds())
+
+    if blocked_until and blocked_until <= now:
+        attempts[identifier] = {'count': 0, 'blocked_until': None}
+
+    return False, 0
+
+
+def register_login_failure(identifier):
+    attempts = app.config.setdefault('LOGIN_ATTEMPTS', {})
+    state = attempts.get(identifier, {'count': 0, 'blocked_until': None})
+    state['count'] += 1
+
+    if state['count'] >= app.config['LOGIN_MAX_ATTEMPTS']:
+        state['blocked_until'] = datetime.utcnow() + timedelta(minutes=app.config['LOGIN_BLOCK_MINUTES'])
+        state['count'] = 0
+
+    attempts[identifier] = state
+
+
+def clear_login_failures(identifier):
+    attempts = app.config.setdefault('LOGIN_ATTEMPTS', {})
+    attempts.pop(identifier, None)
+
+
 def redirect_to_role_dashboard():
     if current_user.role == 'student':
         return redirect(url_for('student_dashboard'))
@@ -178,6 +235,33 @@ def redirect_to_role_dashboard():
     if current_user.role == 'admin':
         return redirect(url_for('admin_dashboard'))
     return redirect(url_for('index'))
+
+
+@app.context_processor
+def inject_template_security():
+    default_ui = {'theme': 'dark', 'compact': 'off', 'animations': 'on'}
+    if current_user.is_authenticated:
+        default_ui = {
+            'theme': current_user.theme or 'dark',
+            'compact': 'on' if current_user.compact_mode else 'off',
+            'animations': 'on' if current_user.animations_enabled else 'off'
+        }
+
+    return {
+        'csrf_token': get_or_create_csrf_token(),
+        'ui_settings': default_ui
+    }
+
+
+@app.before_request
+def enforce_csrf_protection():
+    if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        return
+
+    sent_token = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token')
+    if not sent_token or sent_token != session.get('csrf_token'):
+        app.logger.warning('csrf_validation_failed path=%s ip=%s', request.path, request.remote_addr)
+        abort(400)
 
 
 @app.before_request
@@ -282,6 +366,12 @@ def login():
         password = request.form.get('password', '')
         selected_role = request.form.get('role')
 
+        identifier = f"{request.remote_addr}:{email}"
+        blocked, seconds_left = is_login_rate_limited(identifier)
+        if blocked:
+            flash(f'Слишком много попыток входа. Повторите через {max(1, seconds_left // 60)} мин.')
+            return render_template('login.html', role=role)
+
         user = User.query.filter_by(email=email).first()
 
         if user and password_matches(user.password, password):
@@ -296,6 +386,7 @@ def login():
                 return redirect(url_for('login', role=user.role))
 
             login_user(user)
+            clear_login_failures(identifier)
             log_audit('login_success', f'user={user.email}, role={user.role}')
 
             if user.role == 'teacher':
@@ -304,6 +395,7 @@ def login():
                 return redirect(url_for('admin_dashboard'))
             return redirect(url_for('student_dashboard'))
 
+        register_login_failure(identifier)
         log_audit('login_failed', f'email={email}, role={selected_role or role}')
         flash('Неверный email или пароль')
 
@@ -343,9 +435,21 @@ def profile():
     return render_template('profile.html')
 
 
-@app.route('/settings')
+@app.route('/settings', methods=['GET', 'POST'])
 @login_required
 def settings():
+    if request.method == 'POST':
+        theme = request.form.get('theme', 'dark')
+        compact_mode = request.form.get('compact_mode', 'off')
+        animations_enabled = request.form.get('animations_enabled', 'on')
+
+        current_user.theme = theme if theme in {'dark', 'light'} else 'dark'
+        current_user.compact_mode = compact_mode == 'on'
+        current_user.animations_enabled = animations_enabled != 'off'
+        db.session.commit()
+        flash('Настройки сохранены')
+        return redirect(url_for('settings'))
+
     return render_template('settings.html')
 
 
@@ -868,5 +972,40 @@ def export_all_users():
     )
 
 
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline';"
+    return response
+
+
+@app.errorhandler(400)
+def bad_request(_error):
+    return render_template('error_400.html'), 400
+
+
+@app.errorhandler(404)
+def not_found(_error):
+    return render_template('error_404.html'), 404
+
+
+@app.errorhandler(500)
+def server_error(error):
+    app.logger.exception('server_error: %s', error)
+    return render_template('error_500.html'), 500
+
+
 if __name__ == '__main__':
+    if not app.debug:
+        log_handler = RotatingFileHandler('app.log', maxBytes=1024 * 1024, backupCount=3)
+        log_handler.setLevel(logging.INFO)
+        log_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+        if not app.logger.handlers:
+            app.logger.addHandler(log_handler)
+    app.logger.setLevel(logging.INFO)
     app.run(debug=True)

@@ -11,6 +11,7 @@
         </div>
 
         <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="email" name="email" class="input-field" placeholder="Email" required>
             <input type="password" name="password" class="input-field" placeholder="Пароль" required>
             <select name="role" class="input-field" required>
