@@ -11,7 +11,7 @@
         </div>
 
         <form method="POST">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="email" name="email" class="input-field" placeholder="Email" required>
             <input type="password" name="password" class="input-field" placeholder="Пароль" required>
             <select name="role" class="input-field" required>
@@ -22,9 +22,12 @@
             <button type="submit" class="btn auth-btn">Войти</button>
         </form>
 
-        <div class="auth-footer">
-            <span>Нет аккаунта?</span>
-            <a href="{{ url_for('register') }}">Регистрация</a>
+        <div class="auth-footer" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <div>
+                <span>Нет аккаунта?</span>
+                <a href="{{ url_for('register') }}">Регистрация</a>
+            </div>
+            <a href="{{ url_for('forgot_password') }}">Забыли пароль?</a>
         </div>
 
     </div>

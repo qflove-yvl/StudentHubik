@@ -11,6 +11,8 @@ import re
 import secrets
 from datetime import datetime, timedelta
 import logging
+import smtplib
+from email.message import EmailMessage
 from logging.handlers import RotatingFileHandler
 
 from sqlalchemy import func, inspect, text
@@ -24,6 +26,12 @@ app.config['ADMIN_EMAIL'] = os.getenv('ADMIN_EMAIL', 'admin@studenthubik.local')
 app.config['ADMIN_PASSWORD'] = os.getenv('ADMIN_PASSWORD', 'admin12345')
 app.config['LOGIN_MAX_ATTEMPTS'] = int(os.getenv('LOGIN_MAX_ATTEMPTS', '5'))
 app.config['LOGIN_BLOCK_MINUTES'] = int(os.getenv('LOGIN_BLOCK_MINUTES', '10'))
+app.config['PASSWORD_RESET_TOKEN_MINUTES'] = int(os.getenv('PASSWORD_RESET_TOKEN_MINUTES', '30'))
+app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', '')
+app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', '587'))
+app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
+app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
+app.config['SMTP_FROM_EMAIL'] = os.getenv('SMTP_FROM_EMAIL', app.config['ADMIN_EMAIL'])
 
 
 db = SQLAlchemy(app)
@@ -50,6 +58,16 @@ class VerificationCode(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     code = db.Column(db.String(6))
+
+
+class PasswordResetToken(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    token = db.Column(db.String(120), unique=True, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    is_used = db.Column(db.Boolean, default=False)
+
+    user = db.relationship('User')
 
 
 class Group(db.Model):
@@ -225,6 +243,52 @@ def register_login_failure(identifier):
 def clear_login_failures(identifier):
     attempts = app.config.setdefault('LOGIN_ATTEMPTS', {})
     attempts.pop(identifier, None)
+
+
+
+
+def send_password_reset_email(email_to, reset_link):
+    smtp_host = app.config.get('SMTP_HOST')
+    smtp_user = app.config.get('SMTP_USER')
+    smtp_password = app.config.get('SMTP_PASSWORD')
+    smtp_port = app.config.get('SMTP_PORT', 587)
+
+    if not smtp_host or not smtp_user or not smtp_password:
+        app.logger.warning('smtp_not_configured reset_link=%s', reset_link)
+        return False
+
+    message = EmailMessage()
+    message['Subject'] = 'StudentHubik: восстановление пароля'
+    message['From'] = app.config.get('SMTP_FROM_EMAIL')
+    message['To'] = email_to
+    message.set_content(
+        f'Для восстановления пароля перейдите по ссылке\n{reset_link}\n\n'
+        f'Ссылка действует {app.config.get("PASSWORD_RESET_TOKEN_MINUTES", 30)} минут.'
+    )
+
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as smtp:
+        smtp.starttls()
+        smtp.login(smtp_user, smtp_password)
+        smtp.send_message(message)
+
+    return True
+
+
+def build_student_subject_grade_rows(grades):
+    by_subject = {}
+    for item in grades:
+        subject_name = item.subject.name if item.subject else '—'
+        group = by_subject.setdefault(subject_name, {'grades': [], 'avg': None})
+        group['grades'].append(item)
+
+    result = []
+    for subject_name, payload in sorted(by_subject.items(), key=lambda x: x[0].lower()):
+        ordered = sorted(payload['grades'], key=lambda g: (g.graded_at or datetime.min, g.id))
+        values = [g.grade for g in ordered]
+        avg_value = round(sum(values) / len(values), 2) if values else 0
+        result.append({'subject_name': subject_name, 'grades': ordered, 'avg': avg_value})
+
+    return result
 
 
 def redirect_to_role_dashboard():
@@ -405,6 +469,60 @@ def login():
     return render_template('login.html', role=role)
 
 
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        user = User.query.filter_by(email=email).first()
+
+        if user:
+            PasswordResetToken.query.filter_by(user_id=user.id, is_used=False).update({'is_used': True})
+            token = secrets.token_urlsafe(36)
+            expires_at = datetime.utcnow() + timedelta(minutes=app.config['PASSWORD_RESET_TOKEN_MINUTES'])
+            db.session.add(PasswordResetToken(user_id=user.id, token=token, expires_at=expires_at, is_used=False))
+            db.session.commit()
+
+            reset_link = url_for('reset_password', token=token, _external=True)
+            sent = send_password_reset_email(user.email, reset_link)
+            if not sent:
+                app.logger.info('password_reset_link_for_%s: %s', user.email, reset_link)
+
+        flash('Если email есть в системе, мы отправили ссылку для восстановления пароля.')
+        return redirect(url_for('login'))
+
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    reset_entry = PasswordResetToken.query.filter_by(token=token, is_used=False).first()
+
+    if not reset_entry or reset_entry.expires_at < datetime.utcnow():
+        flash('Ссылка недействительна или истекла')
+        return redirect(url_for('forgot_password'))
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+
+        if len(password) < 6:
+            flash('Пароль должен быть не короче 6 символов')
+            return redirect(url_for('reset_password', token=token))
+
+        if password != confirm_password:
+            flash('Пароли не совпадают')
+            return redirect(url_for('reset_password', token=token))
+
+        reset_entry.user.password = generate_password_hash(password)
+        reset_entry.is_used = True
+        db.session.commit()
+        log_audit('password_reset', f'user={reset_entry.user.email}')
+        flash('Пароль успешно обновлён. Теперь войдите с новым паролем.')
+        return redirect(url_for('login'))
+
+    return render_template('reset_password.html', token=token)
+
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -501,7 +619,8 @@ def student_dashboard():
         best_grade=best_grade,
         worst_grade=worst_grade,
         group_name=group_name,
-        subject_averages=subject_averages
+        subject_averages=subject_averages,
+        subject_grade_rows=build_student_subject_grade_rows(grades)
     )
 
 

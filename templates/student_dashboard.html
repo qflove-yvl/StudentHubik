@@ -8,7 +8,6 @@
 </div>
 
 <div class="card-grid">
-
     <div class="card">
         <div class="card-title">Группа</div>
         <div class="card-value">{{ group_name }}</div>
@@ -33,60 +32,41 @@
         <div class="card-title">Минимальная оценка</div>
         <div class="card-value">{{ worst_grade }}</div>
     </div>
-
 </div>
 
-<section class="card" style="margin-bottom:18px;">
-    <h2>Средний балл по предметам</h2>
-    {% if subject_averages %}
-    <div class="table-wrap">
-        <table class="grade-table">
-            <thead>
-                <tr>
-                    <th>Предмет</th>
-                    <th>Средний балл</th>
-                    <th>Оценок</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for subject_name, subject_avg, grades_count in subject_averages %}
-                <tr>
-                    <td>{{ subject_name }}</td>
-                    <td>{{ subject_avg }}</td>
-                    <td>{{ grades_count }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <p class="muted-text">Пока нет оценок для расчёта среднего.</p>
-    {% endif %}
-</section>
-
 <section class="card list-card student-grades">
-    <h2>Мои оценки</h2>
+    <h2>Успеваемость по предметам</h2>
 
-    <input type="text" id="student-grade-search" class="input-field" placeholder="Поиск по предмету/комментарию/дате">
+    <input type="text" id="student-grade-search" class="input-field" placeholder="Поиск по предмету/оценке/комментарию/дате">
 
-    {% if grades %}
+    {% if subject_grade_rows %}
     <div class="table-wrap">
         <table class="grade-table" id="student-grade-table">
             <thead>
                 <tr>
                     <th>Предмет</th>
-                    <th>Оценка</th>
-                    <th>Комментарий</th>
-                    <th>Выставлена</th>
+                    <th>Оценки (дата сверху)</th>
+                    <th>Средний балл</th>
                 </tr>
             </thead>
             <tbody>
-                {% for item in grades %}
+                {% for row in subject_grade_rows %}
                 <tr>
-                    <td>{{ item.subject.name }}</td>
-                    <td><span class="badge">{{ item.grade }}</span></td>
-                    <td>{{ item.comment or '—' }}</td>
-                    <td>{{ item.graded_at.strftime('%d.%m.%Y %H:%M') if item.graded_at else '—' }}</td>
+                    <td>{{ row.subject_name }}</td>
+                    <td>
+                        <div class="grade-strip">
+                            {% for item in row.grades %}
+                                <div class="grade-chip" title="{{ item.comment or 'Без комментария' }}">
+                                    <div class="grade-date">{{ item.graded_at.strftime('%d.%m') if item.graded_at else '—' }}</div>
+                                    <div class="grade-number">{{ item.grade }}</div>
+                                    {% if item.comment %}
+                                        <div class="grade-comment">{{ item.comment }}</div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td><span class="badge">{{ row.avg }}</span></td>
                 </tr>
                 {% endfor %}
             </tbody>
