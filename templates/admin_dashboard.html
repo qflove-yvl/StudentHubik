@@ -3,43 +3,62 @@
 
 <h1 class="page-title">Админ-панель</h1>
 
+<div class="dashboard-actions">
+    <a href="{{ url_for('export_all_users') }}" class="btn">Экспорт всех пользователей (CSV)</a>
+</div>
+
 <div class="card-grid">
-    <div class="card">
-        <div class="card-title">Заявок преподавателей</div>
-        <div class="card-value">{{ pending_teachers|length }}</div>
-    </div>
-    <div class="card">
-        <div class="card-title">Одобренных преподавателей</div>
-        <div class="card-value">{{ approved_teachers|length }}</div>
-    </div>
-    <div class="card">
-        <div class="card-title">Студентов</div>
-        <div class="card-value">{{ students_count }}</div>
-    </div>
+    <div class="card"><div class="card-title">Новые студенты</div><div class="card-value">{{ pending_students|length }}</div></div>
+    <div class="card"><div class="card-title">Новые преподаватели</div><div class="card-value">{{ pending_teachers|length }}</div></div>
+    <div class="card"><div class="card-title">Одобренных студентов</div><div class="card-value">{{ approved_students|length }}</div></div>
+    <div class="card"><div class="card-title">Одобренных преподавателей</div><div class="card-value">{{ approved_teachers|length }}</div></div>
 </div>
 
 <section class="card" style="margin-bottom:24px;">
-    <h2 style="margin-bottom:14px;">Заявки на роль преподавателя</h2>
-    {% if pending_teachers %}
+    <h2 style="margin-bottom:14px;">Управление группами</h2>
+    <form method="POST" action="{{ url_for('admin_add_group') }}" style="margin-bottom:14px;max-width:500px;">
+        <input type="text" name="group_name" class="input-field" placeholder="Новая группа (например ИС24-01/2)" required>
+        <button class="btn" type="submit">Добавить группу</button>
+    </form>
+
+    {% if all_groups %}
         <div class="table-wrap">
             <table class="grade-table">
-                <thead>
-                    <tr>
-                        <th>Имя</th>
-                        <th>Email</th>
-                        <th>Действия</th>
-                    </tr>
-                </thead>
+                <thead><tr><th>Группа</th><th>Действие</th></tr></thead>
                 <tbody>
-                    {% for teacher in pending_teachers %}
+                    {% for group in all_groups %}
                     <tr>
-                        <td>{{ teacher.name }}</td>
-                        <td>{{ teacher.email }}</td>
+                        <td>{{ group.name }}</td>
                         <td>
-                            <form method="POST" action="{{ url_for('approve_teacher', user_id=teacher.id) }}" style="display:inline-block;">
+                            <form method="POST" action="{{ url_for('admin_delete_group', group_id=group.id) }}">
+                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Заявки студентов</h2>
+    {% if pending_students %}
+        <div class="table-wrap">
+            <table class="grade-table">
+                <thead><tr><th>ФИО</th><th>Email</th><th>Группа</th><th>Действия</th></tr></thead>
+                <tbody>
+                    {% for user in pending_students %}
+                    <tr>
+                        <td>{{ user.name }}</td>
+                        <td>{{ user.email }}</td>
+                        <td>{{ user.group_id or '—' }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('approve_user', user_id=user.id) }}" style="display:inline-block;">
                                 <button class="btn" type="submit">Одобрить</button>
                             </form>
-                            <form method="POST" action="{{ url_for('reject_teacher', user_id=teacher.id) }}" style="display:inline-block;margin-left:8px;">
+                            <form method="POST" action="{{ url_for('reject_user', user_id=user.id) }}" style="display:inline-block;margin-left:8px;">
                                 <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить</button>
                             </form>
                         </td>
@@ -49,7 +68,97 @@
             </table>
         </div>
     {% else %}
-        <p class="muted-text">Новых заявок нет.</p>
+        <p class="muted-text">Нет новых заявок студентов.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Заявки преподавателей</h2>
+    {% if pending_teachers %}
+        <div class="table-wrap">
+            <table class="grade-table">
+                <thead><tr><th>ФИО</th><th>Email</th><th>Действия</th></tr></thead>
+                <tbody>
+                    {% for user in pending_teachers %}
+                    <tr>
+                        <td>{{ user.name }}</td>
+                        <td>{{ user.email }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('approve_user', user_id=user.id) }}" style="display:inline-block;">
+                                <button class="btn" type="submit">Одобрить</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('reject_user', user_id=user.id) }}" style="display:inline-block;margin-left:8px;">
+                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted-text">Нет новых заявок преподавателей.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Одобренные преподаватели: предметы под контролем админа</h2>
+    {% for teacher in approved_teachers %}
+        <div class="card" style="margin-bottom:14px;padding:18px;">
+            <h3 style="margin-bottom:8px;">{{ teacher.name }} ({{ teacher.email }})</h3>
+            <form method="POST" action="{{ url_for('admin_add_subject_for_teacher', teacher_id=teacher.id) }}" style="max-width:500px;">
+                <input type="text" name="subject_name" class="input-field" placeholder="Добавить предмет преподавателю" required>
+                <button class="btn" type="submit">Добавить предмет</button>
+            </form>
+        </div>
+    {% endfor %}
+
+    {% if all_subjects %}
+        <div class="table-wrap">
+            <table class="grade-table">
+                <thead><tr><th>Предмет</th><th>ID препода</th><th>Действие</th></tr></thead>
+                <tbody>
+                    {% for subject in all_subjects %}
+                    <tr>
+                        <td>{{ subject.name }}</td>
+                        <td>{{ subject.teacher_id }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin_delete_subject', subject_id=subject.id) }}">
+                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить предмет</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</section>
+
+<section class="card">
+    <h2 style="margin-bottom:14px;">Все одобренные студенты (с удалением аккаунта)</h2>
+    {% if approved_students %}
+        <div class="table-wrap">
+            <table class="grade-table">
+                <thead><tr><th>ФИО</th><th>Email</th><th>Группа</th><th>Действие</th></tr></thead>
+                <tbody>
+                    {% for student in approved_students %}
+                    <tr>
+                        <td>{{ student.name }}</td>
+                        <td>{{ student.email }}</td>
+                        <td>{{ student.group_id or '—' }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin_delete_student', user_id=student.id) }}">
+                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить аккаунт</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted-text">Пока нет одобренных студентов.</p>
     {% endif %}
 </section>
 

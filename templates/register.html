@@ -7,11 +7,11 @@
         <div class="auth-header">
             <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik">
             <h1>Регистрация</h1>
-            <p>Создайте аккаунт в StudentHubik</p>
+            <p>Введите реальные данные для модерации админом</p>
         </div>
 
         <form method="POST" id="register-form">
-            <input type="text" name="name" class="input-field" placeholder="Имя" required>
+            <input type="text" name="name" class="input-field" placeholder="ФИО полностью" required>
             <input type="email" name="email" class="input-field" placeholder="Email" required>
             <input type="password" name="password" class="input-field" placeholder="Пароль" required>
             <input type="password" name="confirm_password" class="input-field" placeholder="Повторите пароль" required>
@@ -22,7 +22,12 @@
                 <option value="teacher">Преподаватель</option>
             </select>
 
-            <input type="text" name="group_name" id="group-name" class="input-field hidden" placeholder="Группа (например ИС24-01/2)">
+            <input type="text" name="group_name" id="group-name" class="input-field hidden" list="group-list" placeholder="Начните вводить группу...">
+            <datalist id="group-list">
+                {% for group in groups %}
+                    <option value="{{ group.name }}"></option>
+                {% endfor %}
+            </datalist>
 
             <button type="submit" class="btn auth-btn">Зарегистрироваться</button>
         </form>
