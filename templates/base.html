@@ -39,6 +39,7 @@
     <aside class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="nav-link">Панель</a>
         <a href="{{ url_for('profile') }}" class="nav-link">Профиль</a>
+        <a href="{{ url_for('support') }}" class="nav-link">Помощь и поддержка</a>
         {% if current_user.role == 'student' %}
             <a href="{{ url_for('student_dashboard') }}" class="nav-link">Мои оценки</a>
             <a href="{{ url_for('export_student_grades') }}" class="nav-link">Экспорт оценок</a>

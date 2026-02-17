@@ -386,3 +386,60 @@ body {
     from { opacity: 0; }
     to { opacity: 1; }
 }
+
+
+@media (max-width: 900px) {
+    .topbar {
+        height: 86px;
+        padding: 0 14px;
+    }
+
+    .top-logo {
+        width: 108px;
+        height: 108px;
+    }
+
+    .app-container {
+        flex-direction: column;
+        min-height: auto;
+    }
+
+    .sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        padding: 12px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .nav-link {
+        margin-bottom: 0;
+        text-align: center;
+    }
+
+    .main-content {
+        padding: 20px 14px;
+    }
+
+    .page-title {
+        font-size: 30px;
+        margin-bottom: 22px;
+    }
+
+    .home-main-logo {
+        width: 150px;
+        height: 150px;
+    }
+
+    .role-sticker {
+        width: 96px;
+        height: 96px;
+        font-size: 52px;
+    }
+
+    .auth-card {
+        padding: 24px;
+    }
+}

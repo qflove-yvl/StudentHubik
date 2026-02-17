@@ -316,6 +316,11 @@ def profile():
     return render_template('profile.html')
 
 
+@app.route('/support')
+def support():
+    return render_template('support.html', support_username='@cestlavieq')
+
+
 @app.route('/student')
 @login_required
 def student_dashboard():
@@ -329,13 +334,20 @@ def student_dashboard():
     best_grade = max(grade_values) if grade_values else '—'
     worst_grade = min(grade_values) if grade_values else '—'
 
+    group_name = '—'
+    if current_user.group_id:
+        group = Group.query.get(current_user.group_id)
+        if group:
+            group_name = group.name
+
     return render_template(
         'student_dashboard.html',
         grades=grades,
         average_grade=average_grade,
         subject_count=subject_count,
         best_grade=best_grade,
-        worst_grade=worst_grade
+        worst_grade=worst_grade,
+        group_name=group_name
     )
 
 

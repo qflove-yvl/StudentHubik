@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="page-title">Помощь и поддержка</h1>
+
+<section class="card" style="max-width:760px;">
+    <h2 style="margin-bottom:12px;">Связь с поддержкой</h2>
+    <p class="muted-text" style="margin-bottom:16px;">Если возникли вопросы по входу, ролям, оценкам или заявкам — пишите в Telegram.</p>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+        <a href="https://t.me/cestlavieq" target="_blank" rel="noopener" class="btn">Открыть Telegram: {{ support_username }}</a>
+        <span class="subject-tag">{{ support_username }}</span>
+    </div>
+
+    <hr style="border-color:rgba(255,255,255,0.12);margin:18px 0;">
+    <h3 style="margin-bottom:8px;">Частые вопросы</h3>
+    <ul style="line-height:1.8;opacity:0.9;padding-left:18px;">
+        <li>Заявки студентов и преподавателей одобряет админ в админ-панели.</li>
+        <li>Если не получается войти — проверьте роль на экране входа.</li>
+        <li>Преподаватель видит только предметы, назначенные администратором.</li>
+    </ul>
+</section>
+
+{% endblock %}
