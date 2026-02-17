@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="page-title">Настройки</h1>
+
+<div class="panel-grid">
+    <section class="card form-card">
+        <h2>Внешний вид</h2>
+        <label class="field-label" for="theme-select">Тема</label>
+        <select id="theme-select" class="input-field">
+            <option value="dark">Тёмная</option>
+            <option value="light">Светлая</option>
+        </select>
+
+        <label class="field-label" for="compact-select">Компактный режим</label>
+        <select id="compact-select" class="input-field">
+            <option value="off">Обычный</option>
+            <option value="on">Компактный</option>
+        </select>
+
+        <label class="field-label" for="animations-select">Анимации</label>
+        <select id="animations-select" class="input-field">
+            <option value="on">Включены</option>
+            <option value="off">Выключены</option>
+        </select>
+
+        <button id="save-ui-settings" class="btn" type="button">Сохранить настройки</button>
+        <p class="muted-text hint-text">Настройки применяются сразу и сохраняются в браузере.</p>
+    </section>
+
+    <section class="card list-card">
+        <h2>Быстрые действия</h2>
+        <div class="quick-actions">
+            <a href="{{ url_for('profile') }}" class="btn">Изменить профиль</a>
+            <a href="{{ url_for('support') }}" class="btn">Связаться с поддержкой</a>
+            <a href="{{ url_for('dashboard') }}" class="btn">Вернуться в панель</a>
+        </div>
+
+        <div class="status-chip-grid" style="margin-top: 16px;">
+            <span class="status-chip">Роль: {{ current_user.role }}</span>
+            <span class="status-chip">Email: {{ current_user.email }}</span>
+            <span class="status-chip">Верификация: {{ 'Да' if current_user.is_verified else 'Нет' }}</span>
+        </div>
+    </section>
+</div>
+
+<script>
+(function () {
+    const root = document.documentElement;
+    const themeSelect = document.getElementById('theme-select');
+    const compactSelect = document.getElementById('compact-select');
+    const animationsSelect = document.getElementById('animations-select');
+    const saveBtn = document.getElementById('save-ui-settings');
+
+    if (!themeSelect || !compactSelect || !animationsSelect || !saveBtn) return;
+
+    const loadValue = (key, fallback) => {
+        try {
+            return localStorage.getItem(key) || fallback;
+        } catch (e) {
+            return fallback;
+        }
+    };
+
+    themeSelect.value = loadValue('studenthubik_theme', 'dark');
+    compactSelect.value = loadValue('studenthubik_compact', 'off');
+    animationsSelect.value = loadValue('studenthubik_animations', 'on');
+
+    const apply = () => {
+        root.setAttribute('data-theme', themeSelect.value);
+        root.setAttribute('data-compact', compactSelect.value);
+        root.setAttribute('data-animations', animationsSelect.value);
+    };
+
+    apply();
+
+    saveBtn.addEventListener('click', () => {
+        try {
+            localStorage.setItem('studenthubik_theme', themeSelect.value);
+            localStorage.setItem('studenthubik_compact', compactSelect.value);
+            localStorage.setItem('studenthubik_animations', animationsSelect.value);
+            apply();
+            saveBtn.textContent = 'Сохранено ✓';
+            setTimeout(() => { saveBtn.textContent = 'Сохранить настройки'; }, 1200);
+        } catch (e) {
+            saveBtn.textContent = 'Не удалось сохранить';
+        }
+    });
+})();
+</script>
+
+{% endblock %}

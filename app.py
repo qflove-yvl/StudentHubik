@@ -170,6 +170,16 @@ def full_name_looks_valid(full_name):
     return len(parts) >= 3
 
 
+def redirect_to_role_dashboard():
+    if current_user.role == 'student':
+        return redirect(url_for('student_dashboard'))
+    if current_user.role == 'teacher':
+        return redirect(url_for('teacher_dashboard'))
+    if current_user.role == 'admin':
+        return redirect(url_for('admin_dashboard'))
+    return redirect(url_for('index'))
+
+
 @app.before_request
 def initialize_database():
     if app.config.get('DB_INITIALIZED'):
@@ -303,16 +313,7 @@ def login():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    if current_user.role == 'student':
-        return redirect(url_for('student_dashboard'))
-
-    if current_user.role == 'teacher':
-        return redirect(url_for('teacher_dashboard'))
-
-    if current_user.role == 'admin':
-        return redirect(url_for('admin_dashboard'))
-
-    return redirect(url_for('index'))
+    return redirect_to_role_dashboard()
 
 
 @app.route('/logout')
@@ -342,6 +343,12 @@ def profile():
     return render_template('profile.html')
 
 
+@app.route('/settings')
+@login_required
+def settings():
+    return render_template('settings.html')
+
+
 @app.route('/support')
 def support():
     return render_template('support.html', support_username='@cestlavieq')
@@ -351,7 +358,7 @@ def support():
 @login_required
 def student_dashboard():
     if current_user.role != 'student':
-        return redirect(url_for('teacher_dashboard'))
+        return redirect_to_role_dashboard()
 
     grades = Grade.query.filter_by(student_id=current_user.id).all()
     grade_values = [grade.grade for grade in grades]
@@ -381,7 +388,7 @@ def student_dashboard():
 @login_required
 def export_student_grades():
     if current_user.role != 'student':
-        return redirect(url_for('teacher_dashboard'))
+        return redirect_to_role_dashboard()
 
     grades = Grade.query.filter_by(student_id=current_user.id).all()
 
@@ -402,7 +409,7 @@ def export_student_grades():
 @login_required
 def teacher_dashboard():
     if current_user.role != 'teacher':
-        return redirect(url_for('student_dashboard'))
+        return redirect_to_role_dashboard()
 
     students = User.query.filter_by(role='student', is_verified=True).order_by(User.name).all()
     groups_by_id = {group.id: group.name for group in Group.query.all()}
@@ -503,7 +510,7 @@ def teacher_dashboard():
 @login_required
 def export_teacher_grades():
     if current_user.role != 'teacher':
-        return redirect(url_for('student_dashboard'))
+        return redirect_to_role_dashboard()
 
     grades = (
         Grade.query.join(Subject)

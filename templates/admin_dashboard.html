@@ -84,37 +84,25 @@
             <input type="hidden" name="role" value="{{ persist.role }}">
             <input type="hidden" name="status" value="{{ persist.status }}">
             <input type="hidden" name="group_id" value="{{ persist.group_id }}">
-            <div style="display:flex; gap:8px; flex-wrap: wrap;">
+            <div style="display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px;">
                 <button class="btn" type="submit" name="bulk_action" value="approve">Одобрить выбранные</button>
                 <button class="btn" type="submit" name="bulk_action" value="reject" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить выбранные</button>
             </div>
-        <div class="table-wrap">
-            <table class="grade-table">
-                <thead><tr><th><input type="checkbox" id="select-all-students"></th><th>ФИО</th><th>Email</th><th>Группа</th><th>Действия</th></tr></thead>
-                <tbody>
-                    {% for user in pending_students %}
-                    <tr>
-                        <td><input type="checkbox" class="pending-student-checkbox" name="selected_user_ids" value="{{ user.id }}"></td>
-                        <td>{{ user.name }}</td>
-                        <td>{{ user.email }}</td>
-                        <td>{{ groups_by_id.get(user.group_id, '—') if user.group_id else '—' }}</td>
-                        <td>
-                            <form method="POST" action="{{ url_for('admin_user_action') }}" style="display:inline-block;">
-                                <input type="hidden" name="user_id" value="{{ user.id }}">
-                                <input type="hidden" name="action" value="approve">
-                                <button class="btn" type="submit">Одобрить</button>
-                            </form>
-                            <form method="POST" action="{{ url_for('admin_user_action') }}" style="display:inline-block;margin-left:8px;">
-                                <input type="hidden" name="user_id" value="{{ user.id }}">
-                                <input type="hidden" name="action" value="reject">
-                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+            <div class="table-wrap">
+                <table class="grade-table">
+                    <thead><tr><th><input type="checkbox" id="select-all-students"></th><th>ФИО</th><th>Email</th><th>Группа</th></tr></thead>
+                    <tbody>
+                        {% for user in pending_students %}
+                        <tr>
+                            <td><input type="checkbox" class="pending-student-checkbox" name="selected_user_ids" value="{{ user.id }}"></td>
+                            <td>{{ user.name }}</td>
+                            <td>{{ user.email }}</td>
+                            <td>{{ groups_by_id.get(user.group_id, '—') if user.group_id else '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </form>
     {% else %}
         <p class="muted-text">Нет новых заявок студентов.</p>
@@ -129,36 +117,24 @@
             <input type="hidden" name="role" value="{{ persist.role }}">
             <input type="hidden" name="status" value="{{ persist.status }}">
             <input type="hidden" name="group_id" value="{{ persist.group_id }}">
-            <div style="display:flex; gap:8px; flex-wrap: wrap;">
+            <div style="display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px;">
                 <button class="btn" type="submit" name="bulk_action" value="approve">Одобрить выбранные</button>
                 <button class="btn" type="submit" name="bulk_action" value="reject" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить выбранные</button>
             </div>
-        <div class="table-wrap">
-            <table class="grade-table">
-                <thead><tr><th><input type="checkbox" id="select-all-teachers"></th><th>ФИО</th><th>Email</th><th>Действия</th></tr></thead>
-                <tbody>
-                    {% for user in pending_teachers %}
-                    <tr>
-                        <td><input type="checkbox" class="pending-teacher-checkbox" name="selected_user_ids" value="{{ user.id }}"></td>
-                        <td>{{ user.name }}</td>
-                        <td>{{ user.email }}</td>
-                        <td>
-                            <form method="POST" action="{{ url_for('admin_user_action') }}" style="display:inline-block;">
-                                <input type="hidden" name="user_id" value="{{ user.id }}">
-                                <input type="hidden" name="action" value="approve">
-                                <button class="btn" type="submit">Одобрить</button>
-                            </form>
-                            <form method="POST" action="{{ url_for('admin_user_action') }}" style="display:inline-block;margin-left:8px;">
-                                <input type="hidden" name="user_id" value="{{ user.id }}">
-                                <input type="hidden" name="action" value="reject">
-                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+            <div class="table-wrap">
+                <table class="grade-table">
+                    <thead><tr><th><input type="checkbox" id="select-all-teachers"></th><th>ФИО</th><th>Email</th></tr></thead>
+                    <tbody>
+                        {% for user in pending_teachers %}
+                        <tr>
+                            <td><input type="checkbox" class="pending-teacher-checkbox" name="selected_user_ids" value="{{ user.id }}"></td>
+                            <td>{{ user.name }}</td>
+                            <td>{{ user.email }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </form>
     {% else %}
         <p class="muted-text">Нет новых заявок преподавателей.</p>
