@@ -51,7 +51,7 @@
     <aside class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="nav-link{% if request.endpoint == 'dashboard' %} active{% endif %}">Панель</a>
         <a href="{{ url_for('profile') }}" class="nav-link{% if request.endpoint == 'profile' %} active{% endif %}">Профиль</a>
-        <a href="{{ url_for('settings') }}" class="nav-link{% if request.endpoint == 'settings' %} active{% endif %}">Настройки</a>
+        <a href="/settings" class="nav-link{% if request.endpoint == 'settings' %} active{% endif %}">Настройки</a>
         <a href="{{ url_for('support') }}" class="nav-link{% if request.endpoint == 'support' %} active{% endif %}">Помощь и поддержка</a>
         {% if current_user.role == 'student' %}
             <a href="{{ url_for('student_dashboard') }}" class="nav-link{% if request.endpoint == 'student_dashboard' %} active{% endif %}">Мои оценки</a>
