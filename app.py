@@ -2,6 +2,7 @@ from flask import abort, flash
 from flask import Flask, render_template, redirect, url_for, request, session
 from flask import Response
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import csv
@@ -16,6 +17,11 @@ from email.message import EmailMessage
 from logging.handlers import RotatingFileHandler
 
 from sqlalchemy import func, inspect, text
+
+try:
+    import sentry_sdk
+except ImportError:  # optional dependency in local dev
+    sentry_sdk = None
 
 
 app = Flask(__name__)
@@ -32,9 +38,13 @@ app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', '587'))
 app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
 app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
 app.config['SMTP_FROM_EMAIL'] = os.getenv('SMTP_FROM_EMAIL', app.config['ADMIN_EMAIL'])
+app.config['SENTRY_DSN'] = os.getenv('SENTRY_DSN', '')
+app.config['ENVIRONMENT'] = os.getenv('ENVIRONMENT', 'development')
+app.config['REQUIRE_STRONG_SECRET_IN_PROD'] = os.getenv('REQUIRE_STRONG_SECRET_IN_PROD', '1') == '1'
 
 
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
@@ -103,6 +113,13 @@ class AuditLog(db.Model):
 
     actor = db.relationship('User')
 
+
+class LoginAttempt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    identifier = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    fail_count = db.Column(db.Integer, nullable=False, default=0)
+    blocked_until = db.Column(db.DateTime, nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def ensure_default_groups():
@@ -224,38 +241,69 @@ def get_or_create_csrf_token():
     return session['csrf_token']
 
 
+def validate_runtime_config():
+    if app.config.get('ENVIRONMENT') == 'production' and app.config.get('REQUIRE_STRONG_SECRET_IN_PROD'):
+        secret_key = app.config.get('SECRET_KEY', '')
+        if secret_key in {'', 'dev-key'} or len(secret_key) < 32:
+            raise RuntimeError('Unsafe SECRET_KEY for production. Set a strong SECRET_KEY (>=32 chars).')
+
+
+def init_error_monitoring():
+    if sentry_sdk and app.config.get('SENTRY_DSN'):
+        sentry_sdk.init(
+            dsn=app.config['SENTRY_DSN'],
+            environment=app.config.get('ENVIRONMENT', 'development'),
+            traces_sample_rate=0.05
+        )
+
+
+def get_or_create_login_attempt(identifier):
+    attempt = LoginAttempt.query.filter_by(identifier=identifier).first()
+    if attempt:
+        return attempt
+
+    attempt = LoginAttempt(identifier=identifier, fail_count=0, blocked_until=None)
+    db.session.add(attempt)
+    db.session.flush()
+    return attempt
+
+
 def is_login_rate_limited(identifier):
-    attempts = app.config.setdefault('LOGIN_ATTEMPTS', {})
-    state = attempts.get(identifier, {'count': 0, 'blocked_until': None})
-    blocked_until = state.get('blocked_until')
     now = datetime.utcnow()
+    attempt = LoginAttempt.query.filter_by(identifier=identifier).first()
+    if not attempt:
+        return False, 0
 
-    if blocked_until and blocked_until > now:
-        return True, int((blocked_until - now).total_seconds())
+    if attempt.blocked_until and attempt.blocked_until > now:
+        return True, int((attempt.blocked_until - now).total_seconds())
 
-    if blocked_until and blocked_until <= now:
-        attempts[identifier] = {'count': 0, 'blocked_until': None}
+    if attempt.blocked_until and attempt.blocked_until <= now:
+        attempt.blocked_until = None
+        attempt.fail_count = 0
+        db.session.commit()
 
     return False, 0
 
 
 def register_login_failure(identifier):
-    attempts = app.config.setdefault('LOGIN_ATTEMPTS', {})
-    state = attempts.get(identifier, {'count': 0, 'blocked_until': None})
-    state['count'] += 1
+    attempt = get_or_create_login_attempt(identifier)
+    attempt.fail_count += 1
 
-    if state['count'] >= app.config['LOGIN_MAX_ATTEMPTS']:
-        state['blocked_until'] = datetime.utcnow() + timedelta(minutes=app.config['LOGIN_BLOCK_MINUTES'])
-        state['count'] = 0
+    if attempt.fail_count >= app.config['LOGIN_MAX_ATTEMPTS']:
+        attempt.blocked_until = datetime.utcnow() + timedelta(minutes=app.config['LOGIN_BLOCK_MINUTES'])
+        attempt.fail_count = 0
 
-    attempts[identifier] = state
+    db.session.commit()
 
 
 def clear_login_failures(identifier):
-    attempts = app.config.setdefault('LOGIN_ATTEMPTS', {})
-    attempts.pop(identifier, None)
+    attempt = LoginAttempt.query.filter_by(identifier=identifier).first()
+    if not attempt:
+        return
 
-
+    attempt.fail_count = 0
+    attempt.blocked_until = None
+    db.session.commit()
 
 
 def send_password_reset_email(email_to, reset_link):
@@ -367,10 +415,19 @@ def initialize_database():
     if app.config.get('DB_INITIALIZED'):
         return
 
+    validate_runtime_config()
     db.create_all()
     ensure_runtime_columns()
     ensure_default_groups()
     ensure_admin_user()
+    stale_threshold = datetime.utcnow() - timedelta(days=30)
+    LoginAttempt.query.filter(
+        LoginAttempt.blocked_until.is_(None),
+        LoginAttempt.fail_count == 0,
+        LoginAttempt.updated_at < stale_threshold
+    ).delete()
+    db.session.commit()
+    init_error_monitoring()
     app.config['DB_INITIALIZED'] = True
 
 
@@ -608,6 +665,21 @@ def settings():
 @app.route('/support')
 def support():
     return render_template('support.html', support_username='@cestlavieq')
+
+
+@app.route('/health')
+def healthcheck():
+    return {'status': 'ok', 'service': 'studenthubik'}, 200
+
+
+@app.route('/ready')
+def readiness_check():
+    try:
+        db.session.execute(text('SELECT 1'))
+        return {'status': 'ready', 'database': 'ok'}, 200
+    except Exception as error:
+        app.logger.exception('readiness_check_failed: %s', error)
+        return {'status': 'not_ready', 'database': 'error'}, 503
 
 
 @app.route('/student')
