@@ -1,40 +1,48 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% set page_safe = page|default(1) %}
+{% set total_pages_safe = total_pages|default(1) %}
+{% set query_safe = query|default('') %}
+{% set role_filter_safe = role_filter|default('all') %}
+{% set status_filter_safe = status_filter|default('pending') %}
+{% set group_filter_safe = group_filter|default('all') %}
+{% set can_manage_safe = can_manage|default(false) %}
+
 <h1 class="page-title">Админ-панель</h1>
-{% if not can_manage %}<p class="muted-text" style="margin-bottom:12px;">Режим куратора: доступ только для просмотра.</p>{% endif %}
+{% if not can_manage_safe %}<p class="muted-text" style="margin-bottom:12px;">Режим куратора: доступ только для просмотра.</p>{% endif %}
 
 <div class="dashboard-actions">
     <a href="{{ url_for('export_all_users') }}" class="btn">Экспорт всех пользователей (CSV)</a>
 </div>
 
-{% if total_pages > 1 %}<div class="pager" style="margin-bottom:12px;">{% for p in range(1, total_pages + 1) %}<a class="pager-link{% if p == page %} active{% endif %}" href="{{ url_for('admin_dashboard', q=query, role=role_filter, status=status_filter, group_id=group_filter, page=p) }}">{{ p }}</a>{% endfor %}</div>{% endif %}
+{% if total_pages_safe > 1 %}<div class="pager" style="margin-bottom:12px;">{% for p in range(1, total_pages_safe + 1) %}<a class="pager-link{% if p == page_safe %} active{% endif %}" href="{{ url_for('admin_dashboard', q=query_safe, role=role_filter_safe, status=status_filter_safe, group_id=group_filter_safe, page=p) }}">{{ p }}</a>{% endfor %}</div>{% endif %}
 
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Поиск и фильтры</h2>
     <form method="GET" action="{{ url_for('admin_dashboard') }}" class="grade-form">
         <label class="field-label" for="q">Поиск по ФИО / email</label>
-        <input id="q" type="text" name="q" class="input-field" value="{{ query }}" placeholder="Введите ФИО или email">
+        <input id="q" type="text" name="q" class="input-field" value="{{ query_safe }}" placeholder="Введите ФИО или email">
 
         <label class="field-label" for="role">Роль</label>
         <select id="role" name="role" class="input-field">
-            <option value="all" {% if role_filter == 'all' %}selected{% endif %}>Все</option>
-            <option value="student" {% if role_filter == 'student' %}selected{% endif %}>Студенты</option>
-            <option value="teacher" {% if role_filter == 'teacher' %}selected{% endif %}>Преподаватели</option>
+            <option value="all" {% if role_filter_safe == 'all' %}selected{% endif %}>Все</option>
+            <option value="student" {% if role_filter_safe == 'student' %}selected{% endif %}>Студенты</option>
+            <option value="teacher" {% if role_filter_safe == 'teacher' %}selected{% endif %}>Преподаватели</option>
         </select>
 
         <label class="field-label" for="status">Статус заявки</label>
         <select id="status" name="status" class="input-field">
-            <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Ожидают одобрения</option>
-            <option value="approved" {% if status_filter == 'approved' %}selected{% endif %}>Одобренные</option>
-            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>Все</option>
+            <option value="pending" {% if status_filter_safe == 'pending' %}selected{% endif %}>Ожидают одобрения</option>
+            <option value="approved" {% if status_filter_safe == 'approved' %}selected{% endif %}>Одобренные</option>
+            <option value="all" {% if status_filter_safe == 'all' %}selected{% endif %}>Все</option>
         </select>
 
         <label class="field-label" for="group_id">Группа (для студентов)</label>
         <select id="group_id" name="group_id" class="input-field">
-            <option value="all" {% if group_filter == 'all' %}selected{% endif %}>Все группы</option>
+            <option value="all" {% if group_filter_safe == 'all' %}selected{% endif %}>Все группы</option>
             {% for group in all_groups %}
-            <option value="{{ group.id }}" {% if group_filter == group.id|string %}selected{% endif %}>{{ group.name }}</option>
+            <option value="{{ group.id }}" {% if group_filter_safe == group.id|string %}selected{% endif %}>{{ group.name }}</option>
             {% endfor %}
         </select>
 
@@ -42,7 +50,7 @@
     </form>
 </section>
 
-{% set persist = {'q': query, 'role': role_filter, 'status': status_filter, 'group_id': group_filter} %}
+{% set persist = {'q': query_safe, 'role': role_filter_safe, 'status': status_filter_safe, 'group_id': group_filter_safe} %}
 
 <div class="card-grid">
     <div class="card"><div class="card-title">Новые студенты</div><div class="card-value">{{ pending_students|length }}</div></div>
@@ -56,7 +64,7 @@
     <form method="POST" action="{{ url_for('admin_add_group') }}" style="margin-bottom:14px;max-width:500px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="text" name="group_name" class="input-field" placeholder="Новая группа (например ИС24-01/2)" required>
-        {% if can_manage %}<button class="btn" type="submit">Добавить группу</button>{% endif %}
+        {% if can_manage_safe %}<button class="btn" type="submit">Добавить группу</button>{% endif %}
     </form>
 
     {% if all_groups %}
@@ -70,7 +78,7 @@
                         <td>
                             <form method="POST" action="{{ url_for('admin_delete_group', group_id=group.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                {% if can_manage %}<button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>{% endif %}
+                                {% if can_manage_safe %}<button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>{% endif %}
                             </form>
                         </td>
                     </tr>
@@ -83,7 +91,7 @@
 
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Заявки студентов</h2>
-    {% if pending_students and can_manage %}
+    {% if pending_students and can_manage_safe %}
         <form method="POST" action="{{ url_for('admin_bulk_user_action') }}" style="margin-bottom: 12px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="q" value="{{ persist.q }}">
@@ -117,7 +125,7 @@
 
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Заявки преподавателей</h2>
-    {% if pending_teachers and can_manage %}
+    {% if pending_teachers and can_manage_safe %}
         <form method="POST" action="{{ url_for('admin_bulk_user_action') }}" style="margin-bottom: 12px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="q" value="{{ persist.q }}">
