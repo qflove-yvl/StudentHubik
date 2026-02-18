@@ -2,10 +2,13 @@
 {% block content %}
 
 <h1 class="page-title">Админ-панель</h1>
+{% if not can_manage %}<p class="muted-text" style="margin-bottom:12px;">Режим куратора: доступ только для просмотра.</p>{% endif %}
 
 <div class="dashboard-actions">
     <a href="{{ url_for('export_all_users') }}" class="btn">Экспорт всех пользователей (CSV)</a>
 </div>
+
+{% if total_pages > 1 %}<div class="pager" style="margin-bottom:12px;">{% for p in range(1, total_pages + 1) %}<a class="pager-link{% if p == page %} active{% endif %}" href="{{ url_for('admin_dashboard', q=query, role=role_filter, status=status_filter, group_id=group_filter, page=p) }}">{{ p }}</a>{% endfor %}</div>{% endif %}
 
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Поиск и фильтры</h2>
@@ -53,7 +56,7 @@
     <form method="POST" action="{{ url_for('admin_add_group') }}" style="margin-bottom:14px;max-width:500px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="text" name="group_name" class="input-field" placeholder="Новая группа (например ИС24-01/2)" required>
-        <button class="btn" type="submit">Добавить группу</button>
+        {% if can_manage %}<button class="btn" type="submit">Добавить группу</button>{% endif %}
     </form>
 
     {% if all_groups %}
@@ -67,7 +70,7 @@
                         <td>
                             <form method="POST" action="{{ url_for('admin_delete_group', group_id=group.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>
+                                {% if can_manage %}<button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>{% endif %}
                             </form>
                         </td>
                     </tr>
@@ -80,7 +83,7 @@
 
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Заявки студентов</h2>
-    {% if pending_students %}
+    {% if pending_students and can_manage %}
         <form method="POST" action="{{ url_for('admin_bulk_user_action') }}" style="margin-bottom: 12px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="q" value="{{ persist.q }}">
@@ -114,7 +117,7 @@
 
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Заявки преподавателей</h2>
-    {% if pending_teachers %}
+    {% if pending_teachers and can_manage %}
         <form method="POST" action="{{ url_for('admin_bulk_user_action') }}" style="margin-bottom: 12px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="q" value="{{ persist.q }}">

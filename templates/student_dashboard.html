@@ -37,6 +37,19 @@
 <section class="card list-card student-grades">
     <h2>Успеваемость по предметам</h2>
 
+    
+    <form method="GET" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
+        <div>
+            <label class="field-label" for="period">Период</label>
+            <select id="period" name="period" class="input-field" style="margin:0;min-width:160px;">
+                <option value="all" {% if period == 'all' %}selected{% endif %}>За всё время</option>
+                <option value="month" {% if period == 'month' %}selected{% endif %}>Последний месяц</option>
+                <option value="week" {% if period == 'week' %}selected{% endif %}>Последняя неделя</option>
+            </select>
+        </div>
+        <button class="btn" type="submit">Применить</button>
+    </form>
+
     <input type="text" id="student-grade-search" class="input-field" placeholder="Поиск по предмету/оценке/комментарию/дате">
 
     {% if subject_grade_rows %}
@@ -75,6 +88,14 @@
     {% else %}
         <p class="muted-text">Оценок пока нет.</p>
     {% endif %}
+    {% if subject_pages > 1 %}
+    <div class="pager">
+        {% for p in range(1, subject_pages + 1) %}
+            <a class="pager-link{% if p == page %} active{% endif %}" href="{{ url_for('student_dashboard', period=period, page=p) }}">{{ p }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
 </section>
 
 <script>

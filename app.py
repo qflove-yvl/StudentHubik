@@ -291,12 +291,32 @@ def build_student_subject_grade_rows(grades):
     return result
 
 
+
+
+def apply_period_filter(query, period_value):
+    now = datetime.utcnow()
+    if period_value == 'week':
+        return query.filter(Grade.graded_at >= now - timedelta(days=7))
+    if period_value == 'month':
+        return query.filter(Grade.graded_at >= now - timedelta(days=31))
+    return query
+
+
+def paginate_items(items, page, per_page):
+    total = len(items)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, pages))
+    start = (page - 1) * per_page
+    end = start + per_page
+    return items[start:end], total, pages, page
+
+
 def redirect_to_role_dashboard():
     if current_user.role == 'student':
         return redirect(url_for('student_dashboard'))
     if current_user.role == 'teacher':
         return redirect(url_for('teacher_dashboard'))
-    if current_user.role == 'admin':
+    if current_user.role in {'admin', 'curator'}:
         return redirect(url_for('admin_dashboard'))
     return redirect(url_for('index'))
 
@@ -442,7 +462,7 @@ def login():
         user = User.query.filter_by(email=email).first()
 
         if user and password_matches(user.password, password):
-            if selected_role not in {'student', 'teacher', 'admin'}:
+            if selected_role not in {'student', 'teacher', 'admin', 'curator'}:
                 selected_role = user.role
 
             if user.role != selected_role:
@@ -585,11 +605,13 @@ def student_dashboard():
     if current_user.role != 'student':
         return redirect_to_role_dashboard()
 
-    grades = (
-        Grade.query.filter_by(student_id=current_user.id)
-        .order_by(Grade.graded_at.desc(), Grade.id.desc())
-        .all()
-    )
+    period = request.args.get('period', 'all')
+    page = request.args.get('page', 1, type=int)
+
+    grades_query = Grade.query.filter_by(student_id=current_user.id)
+    grades_query = apply_period_filter(grades_query, period)
+    grades = grades_query.order_by(Grade.graded_at.desc(), Grade.id.desc()).all()
+
     grade_values = [grade.grade for grade in grades]
     average_grade = round(sum(grade_values) / len(grade_values), 2) if grade_values else 0
     subject_count = len({grade.subject_id for grade in grades})
@@ -600,10 +622,12 @@ def student_dashboard():
         db.session.query(Subject.name, func.round(func.avg(Grade.grade), 2), func.count(Grade.id))
         .join(Grade, Grade.subject_id == Subject.id)
         .filter(Grade.student_id == current_user.id)
-        .group_by(Subject.id, Subject.name)
-        .order_by(Subject.name)
-        .all()
     )
+    subject_averages = apply_period_filter(subject_averages, period)
+    subject_averages = subject_averages.group_by(Subject.id, Subject.name).order_by(Subject.name).all()
+
+    rows = build_student_subject_grade_rows(grades)
+    subject_grade_rows, total_subject_rows, subject_pages, page = paginate_items(rows, page, 8)
 
     group_name = '—'
     if current_user.group_id:
@@ -620,7 +644,11 @@ def student_dashboard():
         worst_grade=worst_grade,
         group_name=group_name,
         subject_averages=subject_averages,
-        subject_grade_rows=build_student_subject_grade_rows(grades)
+        subject_grade_rows=subject_grade_rows,
+        period=period,
+        page=page,
+        subject_pages=subject_pages,
+        total_subject_rows=total_subject_rows
     )
 
 
@@ -654,6 +682,9 @@ def teacher_dashboard():
     students = User.query.filter_by(role='student', is_verified=True).order_by(User.name).all()
     groups_by_id = {group.id: group.name for group in Group.query.all()}
     subjects = Subject.query.filter_by(teacher_id=current_user.id).order_by(Subject.name).all()
+    period = request.args.get('period', 'all')
+    search_query = request.args.get('q', '').strip()
+    page = request.args.get('page', 1, type=int)
 
     if request.method == 'POST':
         action = request.form.get('action')
@@ -749,13 +780,28 @@ def teacher_dashboard():
         flash('Некорректное действие')
         return redirect(url_for('teacher_dashboard'))
 
-    recent_grades = (
-        Grade.query.join(Subject)
+    recent_grades_query = (
+        Grade.query.join(Subject).join(User, Grade.student_id == User.id)
         .filter(Subject.teacher_id == current_user.id)
+    )
+    recent_grades_query = apply_period_filter(recent_grades_query, period)
+    if search_query:
+        recent_grades_query = recent_grades_query.filter(
+            (User.name.ilike(f'%{search_query}%')) |
+            (Subject.name.ilike(f'%{search_query}%')) |
+            (Grade.comment.ilike(f'%{search_query}%'))
+        )
+
+    total_recent_grades = recent_grades_query.count()
+    per_page = 20
+    recent_grades = (
+        recent_grades_query
         .order_by(Grade.graded_at.desc(), Grade.id.desc())
-        .limit(50)
+        .offset((max(page, 1) - 1) * per_page)
+        .limit(per_page)
         .all()
     )
+    total_pages = max(1, (total_recent_grades + per_page - 1) // per_page)
 
     subject_averages = dict(
         db.session.query(Subject.id, func.round(func.avg(Grade.grade), 2))
@@ -771,7 +817,12 @@ def teacher_dashboard():
         subjects=subjects,
         recent_grades=recent_grades,
         groups_by_id=groups_by_id,
-        subject_averages=subject_averages
+        subject_averages=subject_averages,
+        period=period,
+        search_query=search_query,
+        page=page,
+        total_pages=total_pages,
+        total_recent_grades=total_recent_grades
     )
 
 
@@ -804,7 +855,7 @@ def export_teacher_grades():
 @app.route('/admin')
 @login_required
 def admin_dashboard():
-    if current_user.role != 'admin':
+    if current_user.role not in {'admin', 'curator'}:
         return redirect(url_for('dashboard'))
 
     query = request.args.get('q', '').strip()
@@ -829,13 +880,17 @@ def admin_dashboard():
         except ValueError:
             pass
 
-    filtered_users = users_query.order_by(User.id.desc()).all()
+    page = request.args.get('page', 1, type=int)
+    per_page = 30
+    total_filtered = users_query.count()
+    filtered_users = users_query.order_by(User.id.desc()).offset((max(page, 1) - 1) * per_page).limit(per_page).all()
 
     pending_teachers = [u for u in filtered_users if u.role == 'teacher' and not u.is_verified]
     pending_students = [u for u in filtered_users if u.role == 'student' and not u.is_verified]
 
     approved_teachers = [u for u in filtered_users if u.role == 'teacher' and u.is_verified]
     approved_students = [u for u in filtered_users if u.role == 'student' and u.is_verified]
+    total_pages = max(1, (total_filtered + per_page - 1) // per_page)
 
     all_groups = Group.query.order_by(Group.name).all()
     all_subjects = Subject.query.order_by(Subject.name).all()
@@ -854,7 +909,11 @@ def admin_dashboard():
         group_filter=group_filter,
         all_groups=all_groups,
         all_subjects=all_subjects,
-        recent_audit=recent_audit
+        recent_audit=recent_audit,
+        can_manage=current_user.role == 'admin',
+        page=page,
+        total_pages=total_pages,
+        total_filtered=total_filtered
     )
 
 
