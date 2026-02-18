@@ -114,11 +114,22 @@ def ensure_default_groups():
 
 def ensure_admin_user():
     admin_email = app.config['ADMIN_EMAIL']
+    configured_password = app.config['ADMIN_PASSWORD']
     existing_admin = User.query.filter_by(email=admin_email).first()
     if existing_admin:
+        changed = False
         if existing_admin.role != 'admin':
             existing_admin.role = 'admin'
+            changed = True
+        if not existing_admin.is_verified:
             existing_admin.is_verified = True
+            changed = True
+        # Синхронизируем пароль с конфигом, чтобы вход админа не ломался после правок ENV.
+        if not password_matches(existing_admin.password, configured_password):
+            existing_admin.password = generate_password_hash(configured_password)
+            changed = True
+
+        if changed:
             db.session.commit()
         return
 
@@ -126,7 +137,7 @@ def ensure_admin_user():
         User(
             name='Администратор Системы StudentHubik',
             email=admin_email,
-            password=generate_password_hash(app.config['ADMIN_PASSWORD']),
+            password=generate_password_hash(configured_password),
             role='admin',
             is_verified=True
         )
