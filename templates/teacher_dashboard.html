@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% set period_safe = period|default('all') %}
+{% set page_safe = page|default(1) %}
+{% set total_pages_safe = total_pages|default(1) %}
+{% set search_query_safe = search_query|default('') %}
+
 <h1 class="page-title">Кабинет преподавателя</h1>
 
 <div class="dashboard-actions">
@@ -74,10 +79,10 @@
                 <p class="muted-text hint-text">Теперь можно ставить несколько оценок по одному предмету, как в электронном дневнике.</p>
             </form>
         {% endif %}
-        {% if total_pages > 1 %}
+        {% if total_pages_safe > 1 %}
         <div class="pager">
-            {% for p in range(1, total_pages + 1) %}
-                <a class="pager-link{% if p == page %} active{% endif %}" href="{{ url_for('teacher_dashboard', period=period, q=search_query, page=p) }}">{{ p }}</a>
+            {% for p in range(1, total_pages_safe + 1) %}
+                <a class="pager-link{% if p == page_safe %} active{% endif %}" href="{{ url_for('teacher_dashboard', period=period_safe, q=search_query_safe, page=p) }}">{{ p }}</a>
             {% endfor %}
         </div>
         {% endif %}
@@ -91,14 +96,14 @@
         <form method="GET" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
             <div>
                 <label class="field-label" for="q">Поиск</label>
-                <input type="text" id="q" name="q" class="input-field" style="margin:0;min-width:220px;" value="{{ search_query }}" placeholder="Студент / предмет / комментарий">
+                <input type="text" id="q" name="q" class="input-field" style="margin:0;min-width:220px;" value="{{ search_query_safe }}" placeholder="Студент / предмет / комментарий">
             </div>
             <div>
                 <label class="field-label" for="period">Период</label>
                 <select id="period" name="period" class="input-field" style="margin:0;min-width:160px;">
-                    <option value="all" {% if period == 'all' %}selected{% endif %}>За всё время</option>
-                    <option value="month" {% if period == 'month' %}selected{% endif %}>Последний месяц</option>
-                    <option value="week" {% if period == 'week' %}selected{% endif %}>Последняя неделя</option>
+                    <option value="all" {% if period_safe == 'all' %}selected{% endif %}>За всё время</option>
+                    <option value="month" {% if period_safe == 'month' %}selected{% endif %}>Последний месяц</option>
+                    <option value="week" {% if period_safe == 'week' %}selected{% endif %}>Последняя неделя</option>
                 </select>
             </div>
             <button class="btn" type="submit">Фильтр</button>

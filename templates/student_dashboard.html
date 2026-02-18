@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% set period_safe = period|default('all') %}
+{% set page_safe = page|default(1) %}
+{% set subject_pages_safe = subject_pages|default(1) %}
+{% set subject_grade_rows_safe = subject_grade_rows|default([]) %}
+
 <h1 class="page-title">Кабинет студента</h1>
 
 <div class="dashboard-actions">
@@ -42,9 +47,9 @@
         <div>
             <label class="field-label" for="period">Период</label>
             <select id="period" name="period" class="input-field" style="margin:0;min-width:160px;">
-                <option value="all" {% if period == 'all' %}selected{% endif %}>За всё время</option>
-                <option value="month" {% if period == 'month' %}selected{% endif %}>Последний месяц</option>
-                <option value="week" {% if period == 'week' %}selected{% endif %}>Последняя неделя</option>
+                <option value="all" {% if period_safe == 'all' %}selected{% endif %}>За всё время</option>
+                <option value="month" {% if period_safe == 'month' %}selected{% endif %}>Последний месяц</option>
+                <option value="week" {% if period_safe == 'week' %}selected{% endif %}>Последняя неделя</option>
             </select>
         </div>
         <button class="btn" type="submit">Применить</button>
@@ -52,7 +57,7 @@
 
     <input type="text" id="student-grade-search" class="input-field" placeholder="Поиск по предмету/оценке/комментарию/дате">
 
-    {% if subject_grade_rows %}
+    {% if subject_grade_rows_safe %}
     <div class="table-wrap">
         <table class="grade-table" id="student-grade-table">
             <thead>
@@ -63,7 +68,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for row in subject_grade_rows %}
+                {% for row in subject_grade_rows_safe %}
                 <tr>
                     <td>{{ row.subject_name }}</td>
                     <td>
@@ -88,10 +93,10 @@
     {% else %}
         <p class="muted-text">Оценок пока нет.</p>
     {% endif %}
-    {% if subject_pages > 1 %}
+    {% if subject_pages_safe > 1 %}
     <div class="pager">
-        {% for p in range(1, subject_pages + 1) %}
-            <a class="pager-link{% if p == page %} active{% endif %}" href="{{ url_for('student_dashboard', period=period, page=p) }}">{{ p }}</a>
+        {% for p in range(1, subject_pages_safe + 1) %}
+            <a class="pager-link{% if p == page_safe %} active{% endif %}" href="{{ url_for('student_dashboard', period=period_safe, page=p) }}">{{ p }}</a>
         {% endfor %}
     </div>
     {% endif %}
