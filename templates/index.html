@@ -7,20 +7,20 @@
 
     <h1 class="page-title">Добро пожаловать в StudentHubik</h1>
     <p style="opacity:0.78;margin-bottom:42px;font-size:18px;">
-        Современная бесплатная платформа для студентов, преподавателей и админа
+        Официальный цифровой журнал колледжа для студентов, преподавателей и администрации
     </p>
 
     <div class="card-grid">
         <div class="card">
             <div class="card-title">Я студент</div>
-            <div class="card-value"><span class="role-sticker student-sticker">🎓</span></div>
+            <div class="card-value"><span class="role-sticker student-sticker"><span class="sticker-icon">📘</span></span></div>
             <br>
             <a href="{{ url_for('login', role='student') }}" class="btn">Войти как студент</a>
         </div>
 
         <div class="card">
             <div class="card-title">Я преподаватель</div>
-            <div class="card-value"><span class="role-sticker teacher-sticker">👨‍🏫</span></div>
+            <div class="card-value"><span class="role-sticker teacher-sticker"><span class="sticker-icon">🧑‍🏫</span></span></div>
             <br>
             <a href="{{ url_for('login', role='teacher') }}" class="btn">Войти как преподаватель</a>
         </div>
@@ -36,6 +36,10 @@
             <span class="status-chip">📤 Экспорт в CSV за 1 клик</span>
             <span class="status-chip">📱 Полностью адаптивный интерфейс</span>
         </div>
+    </section>
+    <section class="card" style="margin-top:18px; text-align:left;">
+        <h2 style="margin-bottom:10px;">Регламент и официальный статус</h2>
+        <p class="muted-text">Сервис предназначен для учебного процесса {{ college_name }}: контроль оценок, расписания и коммуникации в едином интерфейсе.</p>
     </section>
 
 </div>

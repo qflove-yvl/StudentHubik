@@ -23,7 +23,25 @@
     <div class="card"><div class="card-title">Средний за 1 семестр</div><div class="card-value">{{ semester_stats_safe.semester_1_avg }}</div></div>
     <div class="card"><div class="card-title">Средний за 2 семестр</div><div class="card-value">{{ semester_stats_safe.semester_2_avg }}</div></div>
     <div class="card"><div class="card-title">Средний за курс</div><div class="card-value">{{ semester_stats_safe.course_avg }}</div></div>
+    <div class="card"><div class="card-title">Новых оценок за 7 дней</div><div class="card-value">{{ new_grades_count|default(0) }}</div></div>
+    <div class="card"><div class="card-title">Статус успеваемости</div><div class="card-value">{{ risk_level|default('Низкий риск') }}</div></div>
 </div>
+
+<section class="card list-card student-grades">
+    <h2>Динамика среднего балла</h2>
+    {% if progress_points|default([]) %}
+        <div class="progress-line" id="progress-line">
+            {% for point in progress_points %}
+                <div class="progress-point" style="left: {{ ((loop.index0 / ((progress_points|length - 1) if progress_points|length > 1 else 1)) * 100)|round(2) }}%;">
+                    <span class="progress-value">{{ point.avg }}</span>
+                    <span class="progress-label">{{ point.label }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="muted-text">Пока недостаточно данных для динамики.</p>
+    {% endif %}
+</section>
 
 <section class="card list-card student-grades">
     <h2>Успеваемость по предметам</h2>

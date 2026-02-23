@@ -400,6 +400,19 @@ def build_student_subject_grade_rows(grades):
     return result
 
 
+def build_student_progress_points(grades):
+    ordered = sorted(grades, key=lambda g: (g.graded_at or datetime.min, g.id))
+    points = []
+    running = []
+    for item in ordered:
+        running.append(item.grade)
+        points.append({
+            'label': (item.graded_at or datetime.utcnow()).strftime('%d.%m'),
+            'avg': round(sum(running) / len(running), 2)
+        })
+    return points
+
+
 
 
 
@@ -800,8 +813,15 @@ def security_policy():
 @app.route('/notifications')
 @login_required
 def notifications_page():
-    items = Notification.query.filter_by(user_id=current_user.id).order_by(Notification.created_at.desc(), Notification.id.desc()).limit(120).all()
-    return render_template('notifications.html', notifications=items)
+    status = request.args.get('status', 'all')
+    query = Notification.query.filter_by(user_id=current_user.id)
+    if status == 'unread':
+        query = query.filter_by(is_read=False)
+    elif status == 'read':
+        query = query.filter_by(is_read=True)
+
+    items = query.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(200).all()
+    return render_template('notifications.html', notifications=items, status_filter=status)
 
 
 @app.route('/notifications/read/<int:notification_id>', methods=['POST'])
@@ -814,6 +834,15 @@ def mark_notification_read(notification_id):
 
     notification.is_read = True
     db.session.commit()
+    return redirect(url_for('notifications_page'))
+
+
+@app.route('/notifications/read-all', methods=['POST'])
+@login_required
+def mark_all_notifications_read():
+    Notification.query.filter_by(user_id=current_user.id, is_read=False).update({'is_read': True})
+    db.session.commit()
+    flash('Все уведомления помечены как прочитанные')
     return redirect(url_for('notifications_page'))
 
 
@@ -889,6 +918,19 @@ def readiness_check():
         return {'status': 'not_ready', 'database': 'error'}, 503
 
 
+@app.route('/status')
+@login_required
+def status_page():
+    latest_audit = AuditLog.query.order_by(AuditLog.created_at.desc()).first()
+    return render_template(
+        'status.html',
+        app_status='online',
+        db_status='ok',
+        latest_audit=latest_audit,
+        latest_schedule=get_latest_schedule_file()
+    )
+
+
 @app.route('/student')
 @login_required
 def student_dashboard():
@@ -913,6 +955,18 @@ def student_dashboard():
     subject_count = len({grade.subject_id for grade in grades})
     best_grade = max(grade_values) if grade_values else '—'
     worst_grade = min(grade_values) if grade_values else '—'
+    new_grades_count = len([
+        grade for grade in grades
+        if grade.graded_at and grade.graded_at >= datetime.utcnow() - timedelta(days=7)
+    ])
+    risk_level = 'Низкий риск'
+    if isinstance(average_grade, (int, float)):
+        if average_grade < 3.2:
+            risk_level = 'Зона риска'
+        elif average_grade < 4:
+            risk_level = 'Нужно подтянуть'
+
+    progress_points = build_student_progress_points(grades)
 
     subject_averages = (
         db.session.query(Subject.name, func.round(func.avg(Grade.grade), 2), func.count(Grade.id))
@@ -946,6 +1000,9 @@ def student_dashboard():
         period=period,
         semester_filter=semester_filter,
         semester_stats=semester_stats,
+        progress_points=progress_points,
+        new_grades_count=new_grades_count,
+        risk_level=risk_level,
         page=page,
         subject_pages=subject_pages,
         total_subject_rows=total_subject_rows
@@ -1036,6 +1093,57 @@ def teacher_dashboard():
             db.session.commit()
             log_audit('create_grade', f'grade_id={new_grade.id}, student={student.id}, subject={subject.id}, grade={numeric_grade}, semester={semester}')
             flash(f'Оценка добавлена: {student.name} / {subject.name} = {numeric_grade}')
+            return redirect(url_for('teacher_dashboard'))
+
+        if action == 'create_grade_bulk':
+            subject_id = request.form.get('subject_id')
+            semester = request.form.get('semester', '1')
+            if semester not in {'1', '2'}:
+                flash('Семестр должен быть 1 или 2')
+                return redirect(url_for('teacher_dashboard'))
+
+            subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
+            if not subject:
+                flash('Выберите корректный предмет для массового ввода')
+                return redirect(url_for('teacher_dashboard'))
+
+            created = 0
+            for student in students:
+                raw_grade = (request.form.get(f'grade_{student.id}') or '').strip()
+                raw_comment = (request.form.get(f'comment_{student.id}') or '').strip()
+                if not raw_grade:
+                    continue
+
+                try:
+                    numeric_grade = int(raw_grade)
+                except ValueError:
+                    continue
+
+                if numeric_grade < 1 or numeric_grade > 5:
+                    continue
+
+                db.session.add(Grade(
+                    student_id=student.id,
+                    subject_id=subject.id,
+                    grade=numeric_grade,
+                    comment=raw_comment[:300],
+                    semester=int(semester),
+                    graded_at=datetime.utcnow()
+                ))
+                create_notification(
+                    student.id,
+                    'Новая оценка',
+                    f'По предмету {subject.name} добавлена оценка {numeric_grade} (семестр {semester}).'
+                )
+                created += 1
+
+            if created == 0:
+                flash('Не удалось добавить оценки: заполните хотя бы одну валидную оценку (1-5)')
+                return redirect(url_for('teacher_dashboard'))
+
+            db.session.commit()
+            log_audit('create_grade_bulk', f'subject={subject.id}, semester={semester}, created={created}')
+            flash(f'Массовый ввод выполнен: добавлено оценок {created}')
             return redirect(url_for('teacher_dashboard'))
 
         if action in {'update_grade', 'delete_grade'}:

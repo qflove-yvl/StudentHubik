@@ -30,7 +30,10 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
     </div>
 
     <div class="top-center">
-        <div class="top-college-name">{{ college_name|default('StudentHubik') }}</div>
+        <div class="top-center-stack">
+            <div class="top-badge">Официальный электронный журнал</div>
+            <div class="top-college-name">{{ college_name|default('StudentHubik') }}</div>
+        </div>
     </div>
 
     <div class="top-right">
@@ -61,6 +64,7 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
         <a href="/schedule" class="nav-link{% if request.path.startswith('/schedule') %} active{% endif %}">Расписание</a>
         <a href="/notifications" class="nav-link{% if request.path.startswith('/notifications') %} active{% endif %}">Уведомления{% if unread_notifications|default(0) > 0 %} <span class="badge">{{ unread_notifications }}</span>{% endif %}</a>
         <a href="{{ url_for('settings') }}" class="nav-link{% if request.endpoint == 'settings' %} active{% endif %}">Настройки</a>
+        <a href="{{ url_for('status_page') }}" class="nav-link{% if request.endpoint == 'status_page' %} active{% endif %}">Статус системы</a>
         <a href="{{ url_for('support') }}" class="nav-link{% if request.endpoint == 'support' %} active{% endif %}">Помощь и поддержка</a>
         {% if current_user.role == 'student' %}
             <a href="{{ url_for('student_dashboard') }}" class="nav-link{% if request.endpoint == 'student_dashboard' %} active{% endif %}">Мои оценки</a>
@@ -77,10 +81,14 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
     <main class="main-content{% if not current_user.is_authenticated %} no-sidebar{% endif %}">
         {% block content %}{% endblock %}
         <footer class="legal-footer subtle-footer">
-            <a href="/privacy">Политика конфиденциальности</a>
-            <a href="/terms">Пользовательское соглашение</a>
-            <a href="/security-policy">Политика безопасности</a>
-            <span class="muted-text">{{ college_name|default('StudentHubik') }}</span>
+            <div class="legal-links">
+                <a href="/privacy">Политика конфиденциальности</a>
+                <a href="/terms">Пользовательское соглашение</a>
+                <a href="/security-policy">Политика безопасности</a>
+            </div>
+            <div class="legal-meta muted-text">
+                {{ college_name|default('StudentHubik') }} · Версия 1.0.0
+            </div>
         </footer>
     </main>
 

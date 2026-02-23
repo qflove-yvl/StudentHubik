@@ -81,6 +81,46 @@
         {% endif %}
     </section>
 
+    <section class="card form-card">
+        <h2>Массовый ввод оценок</h2>
+        {% if subjects and students %}
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="create_grade_bulk">
+
+            <label class="field-label" for="bulk_subject_id">Предмет</label>
+            <select name="subject_id" id="bulk_subject_id" class="input-field" required>
+                <option value="" disabled selected>Выберите предмет</option>
+                {% for subject in subjects %}<option value="{{ subject.id }}">{{ subject.name }}</option>{% endfor %}
+            </select>
+
+            <label class="field-label" for="bulk_semester">Семестр</label>
+            <select name="semester" id="bulk_semester" class="input-field" required>
+                <option value="1">1 семестр</option>
+                <option value="2">2 семестр</option>
+            </select>
+
+            <div class="table-wrap">
+                <table class="grade-table">
+                    <thead><tr><th>Студент</th><th>Оценка</th><th>Комментарий</th></tr></thead>
+                    <tbody>
+                        {% for student in students %}
+                        <tr>
+                            <td>{{ student.name }}</td>
+                            <td><input type="number" min="1" max="5" name="grade_{{ student.id }}" class="input-field" style="margin:0;max-width:90px;"></td>
+                            <td><input type="text" name="comment_{{ student.id }}" class="input-field" maxlength="300" style="margin:0;min-width:220px;" placeholder="Комментарий"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button class="btn" type="submit" style="margin-top:10px;">Сохранить массово</button>
+        </form>
+        {% else %}
+            <p class="muted-text">Для массового ввода нужны назначенные предметы и одобренные студенты.</p>
+        {% endif %}
+    </section>
+
     <section class="card list-card">
         <h2>Последние оценки (редактирование и удаление)</h2>
         <form method="GET" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
