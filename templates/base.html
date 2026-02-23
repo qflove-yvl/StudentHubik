@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 {% set _ui = ui_settings|default({'theme': 'dark', 'compact': 'off', 'animations': 'on'}) %}
 {% set _csrf = csrf_token|default('') %}
+{% set _schedule_link = safe_url_for('schedule_page') %}
+{% set _notifications_link = safe_url_for('notifications_page') %}
+{% set _privacy_link = safe_url_for('privacy_policy') %}
+{% set _terms_link = safe_url_for('terms_of_use') %}
+{% set _security_link = safe_url_for('security_policy') %}
 <html lang="ru" data-theme="{{ _ui.theme|default('dark') }}" data-compact="{{ _ui.compact|default('off') }}" data-animations="{{ _ui.animations|default('on') }}">
 <head>
 <meta charset="UTF-8">
-<title>StudentHubik</title>
+<title>{{ college_name|default('StudentHubik') }}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -54,8 +59,8 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
     <aside class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="nav-link{% if request.endpoint == 'dashboard' %} active{% endif %}">Панель</a>
         <a href="{{ url_for('profile') }}" class="nav-link{% if request.endpoint == 'profile' %} active{% endif %}">Профиль</a>
-        <a href="{{ url_for('schedule_page') }}" class="nav-link{% if request.endpoint in ['schedule_page', 'download_schedule'] %} active{% endif %}">Расписание</a>
-        <a href="{{ url_for('notifications_page') }}" class="nav-link{% if request.endpoint in ['notifications_page', 'mark_notification_read'] %} active{% endif %}">Уведомления{% if unread_notifications|default(0) > 0 %} <span class="badge">{{ unread_notifications }}</span>{% endif %}</a>
+        {% if _schedule_link %}<a href="{{ _schedule_link }}" class="nav-link{% if request.endpoint in ['schedule_page', 'download_schedule'] %} active{% endif %}">Расписание</a>{% endif %}
+        {% if _notifications_link %}<a href="{{ _notifications_link }}" class="nav-link{% if request.endpoint in ['notifications_page', 'mark_notification_read'] %} active{% endif %}">Уведомления{% if unread_notifications|default(0) > 0 %} <span class="badge">{{ unread_notifications }}</span>{% endif %}</a>{% endif %}
         <a href="{{ url_for('settings') }}" class="nav-link{% if request.endpoint == 'settings' %} active{% endif %}">Настройки</a>
         <a href="{{ url_for('support') }}" class="nav-link{% if request.endpoint == 'support' %} active{% endif %}">Помощь и поддержка</a>
         {% if current_user.role == 'student' %}
@@ -73,9 +78,10 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
     <main class="main-content{% if not current_user.is_authenticated %} no-sidebar{% endif %}">
         {% block content %}{% endblock %}
         <footer class="legal-footer">
-            <a href="{{ url_for('privacy_policy') }}">Политика конфиденциальности</a>
-            <a href="{{ url_for('terms_of_use') }}">Пользовательское соглашение</a>
-            <a href="{{ url_for('security_policy') }}">Политика безопасности</a>
+            {% if _privacy_link %}<a href="{{ _privacy_link }}">Политика конфиденциальности</a>{% endif %}
+            {% if _terms_link %}<a href="{{ _terms_link }}">Пользовательское соглашение</a>{% endif %}
+            {% if _security_link %}<a href="{{ _security_link }}">Политика безопасности</a>{% endif %}
+            <span class="muted-text">{{ college_name|default('StudentHubik') }}</span>
         </footer>
     </main>
 

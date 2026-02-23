@@ -50,6 +50,7 @@ app.config['PASSWORD_RESET_MIN_INTERVAL_SECONDS'] = int(os.getenv('PASSWORD_RESE
 app.config['DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL'] = os.getenv('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL', '1') == '1'
 app.config['SCHEDULE_UPLOAD_DIR'] = os.path.join(app.instance_path, 'schedules')
 app.config['MAX_SCHEDULE_HISTORY'] = int(os.getenv('MAX_SCHEDULE_HISTORY', '20'))
+app.config['COLLEGE_NAME'] = os.getenv('COLLEGE_NAME', 'Красноярский колледж отраслевых технологий и предпринимательства')
 
 
 db = SQLAlchemy(app)
@@ -450,6 +451,13 @@ def paginate_items(items, page, per_page):
     return items[start:end], total, pages, page
 
 
+def safe_url_for(endpoint, **values):
+    try:
+        return url_for(endpoint, **values)
+    except Exception:
+        return None
+
+
 def redirect_to_role_dashboard():
     if current_user.role == 'student':
         return redirect(url_for('student_dashboard'))
@@ -480,7 +488,9 @@ def inject_template_security():
     return {
         'csrf_token': get_or_create_csrf_token(),
         'ui_settings': default_ui,
-        'unread_notifications': unread_notifications
+        'unread_notifications': unread_notifications,
+        'college_name': app.config.get('COLLEGE_NAME'),
+        'safe_url_for': safe_url_for
     }
 
 
