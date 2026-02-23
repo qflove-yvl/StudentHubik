@@ -7,7 +7,7 @@
         <div class="auth-header">
             <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik">
             <h1>Вход</h1>
-            <p>Выберите роль и войдите в систему</p>
+            <p>{{ college_name|default("StudentHubik") }} · электронный журнал</p>
         </div>
 
         <form method="POST" class="auth-form" id="login-form">
