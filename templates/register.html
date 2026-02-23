@@ -14,8 +14,16 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="text" name="name" class="input-field" placeholder="ФИО полностью" required>
             <input type="email" name="email" class="input-field" placeholder="Email" required>
-            <input type="password" name="password" class="input-field" placeholder="Пароль" required>
-            <input type="password" name="confirm_password" class="input-field" placeholder="Повторите пароль" required>
+
+            <div class="password-field-wrap">
+                <input id="register-password" type="password" name="password" class="input-field" placeholder="Пароль" minlength="6" required>
+                <button type="button" class="ghost-btn toggle-password" data-target="register-password">Показать</button>
+            </div>
+
+            <div class="password-field-wrap">
+                <input id="register-confirm-password" type="password" name="confirm_password" class="input-field" placeholder="Повторите пароль" minlength="6" required>
+                <button type="button" class="ghost-btn toggle-password" data-target="register-confirm-password">Показать</button>
+            </div>
 
             <select name="role" id="role-select" class="input-field" required>
                 <option value="" disabled selected>Выберите роль</option>

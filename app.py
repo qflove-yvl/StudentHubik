@@ -38,9 +38,14 @@ app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', '587'))
 app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
 app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
 app.config['SMTP_FROM_EMAIL'] = os.getenv('SMTP_FROM_EMAIL', app.config['ADMIN_EMAIL'])
+app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', '1') == '1'
+app.config['SMTP_USE_SSL'] = os.getenv('SMTP_USE_SSL', '0') == '1'
+app.config['SMTP_TIMEOUT_SECONDS'] = int(os.getenv('SMTP_TIMEOUT_SECONDS', '15'))
 app.config['SENTRY_DSN'] = os.getenv('SENTRY_DSN', '')
 app.config['ENVIRONMENT'] = os.getenv('ENVIRONMENT', 'development')
 app.config['REQUIRE_STRONG_SECRET_IN_PROD'] = os.getenv('REQUIRE_STRONG_SECRET_IN_PROD', '1') == '1'
+app.config['PASSWORD_RESET_MIN_INTERVAL_SECONDS'] = int(os.getenv('PASSWORD_RESET_MIN_INTERVAL_SECONDS', '60'))
+app.config['DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL'] = os.getenv('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL', '1') == '1'
 
 
 db = SQLAlchemy(app)
@@ -311,10 +316,13 @@ def send_password_reset_email(email_to, reset_link):
     smtp_user = app.config.get('SMTP_USER')
     smtp_password = app.config.get('SMTP_PASSWORD')
     smtp_port = app.config.get('SMTP_PORT', 587)
+    smtp_use_tls = app.config.get('SMTP_USE_TLS', True)
+    smtp_use_ssl = app.config.get('SMTP_USE_SSL', False)
+    smtp_timeout = app.config.get('SMTP_TIMEOUT_SECONDS', 15)
 
     if not smtp_host or not smtp_user or not smtp_password:
         app.logger.warning('smtp_not_configured reset_link=%s', reset_link)
-        return False
+        return False, 'smtp_not_configured'
 
     message = EmailMessage()
     message['Subject'] = 'StudentHubik: восстановление пароля'
@@ -325,12 +333,22 @@ def send_password_reset_email(email_to, reset_link):
         f'Ссылка действует {app.config.get("PASSWORD_RESET_TOKEN_MINUTES", 30)} минут.'
     )
 
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as smtp:
-        smtp.starttls()
-        smtp.login(smtp_user, smtp_password)
-        smtp.send_message(message)
+    try:
+        if smtp_use_ssl:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=smtp_timeout) as smtp:
+                smtp.login(smtp_user, smtp_password)
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=smtp_timeout) as smtp:
+                if smtp_use_tls:
+                    smtp.starttls()
+                smtp.login(smtp_user, smtp_password)
+                smtp.send_message(message)
+    except Exception as error:
+        app.logger.exception('smtp_send_failed email=%s reason=%s', email_to, error)
+        return False, str(error)
 
-    return True
+    return True, None
 
 
 def build_student_subject_grade_rows(grades):
@@ -540,7 +558,8 @@ def login():
                 flash('Ваша заявка ещё не одобрена администратором')
                 return redirect(url_for('login', role=user.role))
 
-            login_user(user)
+            remember_me = request.form.get('remember_me') == 'on'
+            login_user(user, remember=remember_me)
             clear_login_failures(identifier)
             log_audit('login_success', f'user={user.email}, role={user.role}')
 
@@ -564,16 +583,34 @@ def forgot_password():
         user = User.query.filter_by(email=email).first()
 
         if user:
+            reset_entry = PasswordResetToken.query.filter_by(user_id=user.id, is_used=False).order_by(PasswordResetToken.id.desc()).first()
+            now = datetime.utcnow()
+            min_interval = app.config.get('PASSWORD_RESET_MIN_INTERVAL_SECONDS', 60)
+
+            if reset_entry and reset_entry.expires_at >= now:
+                token_created_at = reset_entry.expires_at - timedelta(minutes=app.config['PASSWORD_RESET_TOKEN_MINUTES'])
+                if (now - token_created_at).total_seconds() < min_interval:
+                    reset_link = url_for('reset_password', token=reset_entry.token, _external=True)
+                    sent, send_reason = send_password_reset_email(user.email, reset_link)
+                    if not sent:
+                        app.logger.info('password_reset_link_for_%s: %s', user.email, reset_link)
+                        if app.config.get('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL') and app.config.get('ENVIRONMENT') != 'production':
+                            flash(f'Тестовый режим: отправка почты не удалась ({send_reason}). Ссылка: {reset_link}')
+                    flash('Если email есть в системе, мы отправили ссылку для восстановления пароля.')
+                    return redirect(url_for('login'))
+
             PasswordResetToken.query.filter_by(user_id=user.id, is_used=False).update({'is_used': True})
             token = secrets.token_urlsafe(36)
-            expires_at = datetime.utcnow() + timedelta(minutes=app.config['PASSWORD_RESET_TOKEN_MINUTES'])
+            expires_at = now + timedelta(minutes=app.config['PASSWORD_RESET_TOKEN_MINUTES'])
             db.session.add(PasswordResetToken(user_id=user.id, token=token, expires_at=expires_at, is_used=False))
             db.session.commit()
 
             reset_link = url_for('reset_password', token=token, _external=True)
-            sent = send_password_reset_email(user.email, reset_link)
+            sent, send_reason = send_password_reset_email(user.email, reset_link)
             if not sent:
                 app.logger.info('password_reset_link_for_%s: %s', user.email, reset_link)
+                if app.config.get('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL') and app.config.get('ENVIRONMENT') != 'production':
+                    flash(f'Тестовый режим: отправка почты не удалась ({send_reason}). Ссылка: {reset_link}')
 
         flash('Если email есть в системе, мы отправили ссылку для восстановления пароля.')
         return redirect(url_for('login'))

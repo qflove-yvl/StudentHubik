@@ -316,3 +316,61 @@ html[data-animations="off"] *,
     color: #fff;
     border-color: transparent;
 }
+
+.password-field-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-field-wrap .input-field {
+    margin-bottom: 12px;
+    padding-right: 110px;
+}
+
+.ghost-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 1px solid var(--border);
+    background: var(--surface-strong);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.checkbox-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    margin-bottom: 12px;
+    font-size: 14px;
+}
+
+.back-to-top {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-strong);
+    color: var(--text);
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+    transform: translateY(8px);
+    z-index: 150;
+}
+
+.back-to-top.show {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}

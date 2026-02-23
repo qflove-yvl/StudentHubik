@@ -75,6 +75,8 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 </div>
 
 
+<button id="back-to-top" class="back-to-top" type="button" aria-label="Наверх">↑</button>
+
 <script>
 (function () {
   const forms = document.querySelectorAll('form');
@@ -88,6 +90,47 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
     input.name = 'csrf_token';
     input.value = APP_CSRF_TOKEN;
     form.appendChild(input);
+  });
+})();
+
+(function () {
+  const flashNodes = document.querySelectorAll('.flash-message');
+  flashNodes.forEach((node) => {
+    setTimeout(() => {
+      node.style.opacity = '0';
+      node.style.transform = 'translateY(-6px)';
+    }, 5200);
+  });
+})();
+
+(function () {
+  const toggles = document.querySelectorAll('.toggle-password');
+  toggles.forEach((button) => {
+    button.addEventListener('click', () => {
+      const targetId = button.getAttribute('data-target');
+      const input = document.getElementById(targetId);
+      if (!input) return;
+      const isPassword = input.type === 'password';
+      input.type = isPassword ? 'text' : 'password';
+      button.textContent = isPassword ? 'Скрыть' : 'Показать';
+    });
+  });
+})();
+
+(function () {
+  const backToTop = document.getElementById('back-to-top');
+  if (!backToTop) return;
+  const toggleVisibility = () => {
+    if (window.scrollY > 260) {
+      backToTop.classList.add('show');
+    } else {
+      backToTop.classList.remove('show');
+    }
+  };
+  window.addEventListener('scroll', toggleVisibility);
+  toggleVisibility();
+  backToTop.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 })();
 </script>
