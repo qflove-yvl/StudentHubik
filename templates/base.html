@@ -54,7 +54,9 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
     <aside class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="nav-link{% if request.endpoint == 'dashboard' %} active{% endif %}">Панель</a>
         <a href="{{ url_for('profile') }}" class="nav-link{% if request.endpoint == 'profile' %} active{% endif %}">Профиль</a>
-        <a href="/settings" class="nav-link{% if request.endpoint == 'settings' %} active{% endif %}">Настройки</a>
+        <a href="{{ url_for('schedule_page') }}" class="nav-link{% if request.endpoint in ['schedule_page', 'download_schedule'] %} active{% endif %}">Расписание</a>
+        <a href="{{ url_for('notifications_page') }}" class="nav-link{% if request.endpoint in ['notifications_page', 'mark_notification_read'] %} active{% endif %}">Уведомления{% if unread_notifications|default(0) > 0 %} <span class="badge">{{ unread_notifications }}</span>{% endif %}</a>
+        <a href="{{ url_for('settings') }}" class="nav-link{% if request.endpoint == 'settings' %} active{% endif %}">Настройки</a>
         <a href="{{ url_for('support') }}" class="nav-link{% if request.endpoint == 'support' %} active{% endif %}">Помощь и поддержка</a>
         {% if current_user.role == 'student' %}
             <a href="{{ url_for('student_dashboard') }}" class="nav-link{% if request.endpoint == 'student_dashboard' %} active{% endif %}">Мои оценки</a>
@@ -70,6 +72,11 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 
     <main class="main-content{% if not current_user.is_authenticated %} no-sidebar{% endif %}">
         {% block content %}{% endblock %}
+        <footer class="legal-footer">
+            <a href="{{ url_for('privacy_policy') }}">Политика конфиденциальности</a>
+            <a href="{{ url_for('terms_of_use') }}">Пользовательское соглашение</a>
+            <a href="{{ url_for('security_policy') }}">Политика безопасности</a>
+        </footer>
     </main>
 
 </div>

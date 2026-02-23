@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Расписание</h1>
+<section class="card" style="margin-bottom:24px;">
+    {% if latest_schedule %}
+        <p class="muted-text">Актуальное расписание: <strong>{{ latest_schedule.original_name }}</strong></p>
+        <p class="muted-text">Загружено: {{ latest_schedule.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</p>
+        <a class="btn" href="{{ url_for('download_schedule', file_id=latest_schedule.id) }}">Скачать актуальный файл</a>
+    {% else %}
+        <p class="muted-text">Файл расписания пока не загружен администратором.</p>
+    {% endif %}
+</section>
+
+<section class="card">
+    <h2 style="margin-bottom:12px;">История файлов расписания</h2>
+    {% if schedule_history %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead><tr><th>Файл</th><th>Дата загрузки</th><th>Действие</th></tr></thead>
+            <tbody>
+                {% for item in schedule_history %}
+                <tr>
+                    <td>{{ item.original_name }}</td>
+                    <td>{{ item.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td><a class="btn" href="{{ url_for('download_schedule', file_id=item.id) }}">Скачать</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p class="muted-text">История пока пустая.</p>
+    {% endif %}
+</section>
+{% endblock %}

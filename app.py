@@ -1,15 +1,17 @@
 from flask import abort, flash
-from flask import Flask, render_template, redirect, url_for, request, session
+from flask import Flask, render_template, redirect, url_for, request, session, send_from_directory
 from flask import Response
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import csv
 import io
 import os
 import re
 import secrets
+import shutil
 from datetime import datetime, timedelta
 import logging
 import smtplib
@@ -46,6 +48,8 @@ app.config['ENVIRONMENT'] = os.getenv('ENVIRONMENT', 'development')
 app.config['REQUIRE_STRONG_SECRET_IN_PROD'] = os.getenv('REQUIRE_STRONG_SECRET_IN_PROD', '1') == '1'
 app.config['PASSWORD_RESET_MIN_INTERVAL_SECONDS'] = int(os.getenv('PASSWORD_RESET_MIN_INTERVAL_SECONDS', '60'))
 app.config['DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL'] = os.getenv('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL', '1') == '1'
+app.config['SCHEDULE_UPLOAD_DIR'] = os.path.join(app.instance_path, 'schedules')
+app.config['MAX_SCHEDULE_HISTORY'] = int(os.getenv('MAX_SCHEDULE_HISTORY', '20'))
 
 
 db = SQLAlchemy(app)
@@ -104,6 +108,7 @@ class Grade(db.Model):
     subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'))
     grade = db.Column(db.Integer)
     comment = db.Column(db.String(300), default='')
+    semester = db.Column(db.Integer, nullable=False, default=1)
     graded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     student = db.relationship('User', foreign_keys=[student_id])
@@ -125,6 +130,27 @@ class LoginAttempt(db.Model):
     fail_count = db.Column(db.Integer, nullable=False, default=0)
     blocked_until = db.Column(db.DateTime, nullable=True)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Notification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    title = db.Column(db.String(120), nullable=False)
+    message = db.Column(db.String(300), nullable=False)
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user = db.relationship('User')
+
+
+class ScheduleFile(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    original_name = db.Column(db.String(255), nullable=False)
+    stored_name = db.Column(db.String(255), nullable=False, unique=True)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    uploaded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    uploaded_by = db.relationship('User')
 
 
 def ensure_default_groups():
@@ -193,6 +219,9 @@ def ensure_runtime_columns():
     if 'graded_at' not in grade_columns:
         db.session.execute(text('ALTER TABLE grade ADD COLUMN graded_at DATETIME'))
         db.session.execute(text('UPDATE grade SET graded_at = CURRENT_TIMESTAMP WHERE graded_at IS NULL'))
+    if 'semester' not in grade_columns:
+        db.session.execute(text('ALTER TABLE grade ADD COLUMN semester INTEGER DEFAULT 1'))
+        db.session.execute(text('UPDATE grade SET semester = 1 WHERE semester IS NULL OR semester < 1 OR semester > 2'))
 
     audit_columns = {column['name'] for column in inspector.get_columns('audit_log')}
     if 'created_at' not in audit_columns:
@@ -320,7 +349,7 @@ def send_password_reset_email(email_to, reset_link):
     smtp_use_ssl = app.config.get('SMTP_USE_SSL', False)
     smtp_timeout = app.config.get('SMTP_TIMEOUT_SECONDS', 15)
 
-    if not smtp_host or not smtp_user or not smtp_password:
+    if not smtp_host:
         app.logger.warning('smtp_not_configured reset_link=%s', reset_link)
         return False, 'smtp_not_configured'
 
@@ -336,13 +365,15 @@ def send_password_reset_email(email_to, reset_link):
     try:
         if smtp_use_ssl:
             with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=smtp_timeout) as smtp:
-                smtp.login(smtp_user, smtp_password)
+                if smtp_user and smtp_password:
+                    smtp.login(smtp_user, smtp_password)
                 smtp.send_message(message)
         else:
             with smtplib.SMTP(smtp_host, smtp_port, timeout=smtp_timeout) as smtp:
                 if smtp_use_tls:
                     smtp.starttls()
-                smtp.login(smtp_user, smtp_password)
+                if smtp_user and smtp_password:
+                    smtp.login(smtp_user, smtp_password)
                 smtp.send_message(message)
     except Exception as error:
         app.logger.exception('smtp_send_failed email=%s reason=%s', email_to, error)
@@ -368,6 +399,37 @@ def build_student_subject_grade_rows(grades):
     return result
 
 
+
+
+
+
+def resolve_semester_filter(raw_value):
+    if raw_value in {'1', '2'}:
+        return int(raw_value)
+    return None
+
+
+def get_semester_averages(grades):
+    first = [g.grade for g in grades if g.semester == 1]
+    second = [g.grade for g in grades if g.semester == 2]
+    overall = [g.grade for g in grades]
+    return {
+        'semester_1_avg': round(sum(first) / len(first), 2) if first else 0,
+        'semester_2_avg': round(sum(second) / len(second), 2) if second else 0,
+        'course_avg': round(sum(overall) / len(overall), 2) if overall else 0
+    }
+
+
+def create_notification(user_id, title, message):
+    db.session.add(Notification(user_id=user_id, title=title[:120], message=message[:300], is_read=False, created_at=datetime.utcnow()))
+
+
+def get_unread_notifications_count(user_id):
+    return Notification.query.filter_by(user_id=user_id, is_read=False).count()
+
+
+def get_latest_schedule_file():
+    return ScheduleFile.query.order_by(ScheduleFile.uploaded_at.desc(), ScheduleFile.id.desc()).first()
 
 
 def apply_period_filter(query, period_value):
@@ -411,9 +473,14 @@ def inject_template_security():
             'animations': 'on' if user_animations else 'off'
         }
 
+    unread_notifications = 0
+    if current_user.is_authenticated:
+        unread_notifications = get_unread_notifications_count(current_user.id)
+
     return {
         'csrf_token': get_or_create_csrf_token(),
-        'ui_settings': default_ui
+        'ui_settings': default_ui,
+        'unread_notifications': unread_notifications
     }
 
 
@@ -434,6 +501,7 @@ def initialize_database():
         return
 
     validate_runtime_config()
+    os.makedirs(app.config.get('SCHEDULE_UPLOAD_DIR'), exist_ok=True)
     db.create_all()
     ensure_runtime_columns()
     ensure_default_groups()
@@ -704,6 +772,98 @@ def support():
     return render_template('support.html', support_username='@cestlavieq')
 
 
+@app.route('/privacy')
+def privacy_policy():
+    return render_template('privacy.html')
+
+
+@app.route('/terms')
+def terms_of_use():
+    return render_template('terms.html')
+
+
+@app.route('/security-policy')
+def security_policy():
+    return render_template('security_policy.html')
+
+
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    items = Notification.query.filter_by(user_id=current_user.id).order_by(Notification.created_at.desc(), Notification.id.desc()).limit(120).all()
+    return render_template('notifications.html', notifications=items)
+
+
+@app.route('/notifications/read/<int:notification_id>', methods=['POST'])
+@login_required
+def mark_notification_read(notification_id):
+    notification = Notification.query.filter_by(id=notification_id, user_id=current_user.id).first()
+    if not notification:
+        flash('Уведомление не найдено')
+        return redirect(url_for('notifications_page'))
+
+    notification.is_read = True
+    db.session.commit()
+    return redirect(url_for('notifications_page'))
+
+
+@app.route('/schedule')
+@login_required
+def schedule_page():
+    latest_schedule = get_latest_schedule_file()
+    schedule_history = ScheduleFile.query.order_by(ScheduleFile.uploaded_at.desc(), ScheduleFile.id.desc()).limit(app.config.get('MAX_SCHEDULE_HISTORY', 20)).all()
+    return render_template('schedule.html', latest_schedule=latest_schedule, schedule_history=schedule_history)
+
+
+@app.route('/schedule/file/<int:file_id>')
+@login_required
+def download_schedule(file_id):
+    schedule_file = ScheduleFile.query.get(file_id)
+    if not schedule_file:
+        flash('Файл расписания не найден')
+        return redirect(url_for('schedule_page'))
+
+    return send_from_directory(
+        app.config.get('SCHEDULE_UPLOAD_DIR'),
+        schedule_file.stored_name,
+        as_attachment=True,
+        download_name=schedule_file.original_name
+    )
+
+
+@app.route('/admin/schedule/upload', methods=['POST'])
+@login_required
+def admin_upload_schedule():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    schedule = request.files.get('schedule_file')
+    if not schedule or not schedule.filename:
+        flash('Выберите файл расписания')
+        return redirect(url_for('admin_dashboard'))
+
+    safe_name = secure_filename(schedule.filename)
+    if not safe_name:
+        flash('Некорректное имя файла')
+        return redirect(url_for('admin_dashboard'))
+
+    stamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    stored_name = f'{stamp}_{safe_name}'
+    full_path = os.path.join(app.config.get('SCHEDULE_UPLOAD_DIR'), stored_name)
+    schedule.save(full_path)
+
+    db.session.add(ScheduleFile(
+        original_name=schedule.filename,
+        stored_name=stored_name,
+        uploaded_by_id=current_user.id,
+        uploaded_at=datetime.utcnow()
+    ))
+    db.session.commit()
+    log_audit('upload_schedule', f'file={schedule.filename}')
+    flash('Расписание загружено и доступно всем пользователям')
+    return redirect(url_for('admin_dashboard'))
+
+
 @app.route('/health')
 def healthcheck():
     return {'status': 'ok', 'service': 'studenthubik'}, 200
@@ -726,14 +886,20 @@ def student_dashboard():
         return redirect_to_role_dashboard()
 
     period = request.args.get('period', 'all')
+    semester_filter = request.args.get('semester', 'all')
     page = request.args.get('page', 1, type=int)
 
     grades_query = Grade.query.filter_by(student_id=current_user.id)
     grades_query = apply_period_filter(grades_query, period)
+    semester_value = resolve_semester_filter(semester_filter)
+    if semester_value:
+        grades_query = grades_query.filter(Grade.semester == semester_value)
     grades = grades_query.order_by(Grade.graded_at.desc(), Grade.id.desc()).all()
 
     grade_values = [grade.grade for grade in grades]
     average_grade = round(sum(grade_values) / len(grade_values), 2) if grade_values else 0
+    all_student_grades = Grade.query.filter_by(student_id=current_user.id).all()
+    semester_stats = get_semester_averages(all_student_grades)
     subject_count = len({grade.subject_id for grade in grades})
     best_grade = max(grade_values) if grade_values else '—'
     worst_grade = min(grade_values) if grade_values else '—'
@@ -744,6 +910,8 @@ def student_dashboard():
         .filter(Grade.student_id == current_user.id)
     )
     subject_averages = apply_period_filter(subject_averages, period)
+    if semester_value:
+        subject_averages = subject_averages.filter(Grade.semester == semester_value)
     subject_averages = subject_averages.group_by(Subject.id, Subject.name).order_by(Subject.name).all()
 
     rows = build_student_subject_grade_rows(grades)
@@ -766,6 +934,8 @@ def student_dashboard():
         subject_averages=subject_averages,
         subject_grade_rows=subject_grade_rows,
         period=period,
+        semester_filter=semester_filter,
+        semester_stats=semester_stats,
         page=page,
         subject_pages=subject_pages,
         total_subject_rows=total_subject_rows
@@ -782,9 +952,9 @@ def export_student_grades():
 
     stream = io.StringIO()
     writer = csv.writer(stream)
-    writer.writerow(['subject', 'grade'])
+    writer.writerow(['subject', 'grade', 'semester', 'graded_at'])
     for item in grades:
-        writer.writerow([item.subject.name, item.grade])
+        writer.writerow([item.subject.name, item.grade, item.semester, item.graded_at.isoformat() if item.graded_at else ''])
 
     return Response(
         stream.getvalue(),
@@ -803,6 +973,8 @@ def teacher_dashboard():
     groups_by_id = {group.id: group.name for group in Group.query.all()}
     subjects = Subject.query.filter_by(teacher_id=current_user.id).order_by(Subject.name).all()
     period = request.args.get('period', 'all')
+    semester_filter = request.args.get('semester', 'all')
+    semester_value = resolve_semester_filter(semester_filter)
     search_query = request.args.get('q', '').strip()
     page = request.args.get('page', 1, type=int)
 
@@ -813,6 +985,7 @@ def teacher_dashboard():
             student_id = request.form.get('student_id')
             subject_id = request.form.get('subject_id')
             grade_value = request.form.get('value')
+            semester = request.form.get('semester', '1')
             comment = request.form.get('comment', '').strip()
 
             if not student_id or not subject_id or not grade_value:
@@ -836,16 +1009,22 @@ def teacher_dashboard():
                 flash('Оценка должна быть от 1 до 5')
                 return redirect(url_for('teacher_dashboard'))
 
+            if semester not in {'1', '2'}:
+                flash('Семестр должен быть 1 или 2')
+                return redirect(url_for('teacher_dashboard'))
+
             new_grade = Grade(
                 student_id=student.id,
                 subject_id=subject.id,
                 grade=numeric_grade,
                 comment=comment[:300],
+                semester=int(semester),
                 graded_at=datetime.utcnow()
             )
             db.session.add(new_grade)
+            create_notification(student.id, 'Новая оценка', f'По предмету {subject.name} выставлена оценка {numeric_grade} (семестр {semester}).')
             db.session.commit()
-            log_audit('create_grade', f'grade_id={new_grade.id}, student={student.id}, subject={subject.id}, grade={numeric_grade}')
+            log_audit('create_grade', f'grade_id={new_grade.id}, student={student.id}, subject={subject.id}, grade={numeric_grade}, semester={semester}')
             flash(f'Оценка добавлена: {student.name} / {subject.name} = {numeric_grade}')
             return redirect(url_for('teacher_dashboard'))
 
@@ -874,6 +1053,7 @@ def teacher_dashboard():
                 return redirect(url_for('teacher_dashboard'))
 
             grade_value = request.form.get('value')
+            semester = request.form.get('semester', '1')
             comment = request.form.get('comment', '').strip()
             if not grade_value:
                 flash('Укажите оценку от 1 до 5')
@@ -889,11 +1069,17 @@ def teacher_dashboard():
                 flash('Оценка должна быть от 1 до 5')
                 return redirect(url_for('teacher_dashboard'))
 
+            if semester not in {'1', '2'}:
+                flash('Семестр должен быть 1 или 2')
+                return redirect(url_for('teacher_dashboard'))
+
             grade_item.grade = numeric_grade
+            grade_item.semester = int(semester)
             grade_item.comment = comment[:300]
             grade_item.graded_at = datetime.utcnow()
             db.session.commit()
-            log_audit('update_grade', f'grade_id={grade_id}, grade={numeric_grade}')
+            create_notification(grade_item.student_id, 'Оценка обновлена', f'Оценка по предмету {grade_item.subject.name} обновлена на {numeric_grade} (семестр {semester}).')
+            log_audit('update_grade', f'grade_id={grade_id}, grade={numeric_grade}, semester={semester}')
             flash('Оценка обновлена')
             return redirect(url_for('teacher_dashboard'))
 
@@ -905,6 +1091,8 @@ def teacher_dashboard():
         .filter(Subject.teacher_id == current_user.id)
     )
     recent_grades_query = apply_period_filter(recent_grades_query, period)
+    if semester_value:
+        recent_grades_query = recent_grades_query.filter(Grade.semester == semester_value)
     if search_query:
         recent_grades_query = recent_grades_query.filter(
             (User.name.ilike(f'%{search_query}%')) |
@@ -931,6 +1119,9 @@ def teacher_dashboard():
         .all()
     )
 
+    all_teacher_grades = Grade.query.join(Subject).filter(Subject.teacher_id == current_user.id).all()
+    teacher_stats = get_semester_averages(all_teacher_grades)
+
     return render_template(
         'teacher_dashboard.html',
         students=students,
@@ -939,7 +1130,9 @@ def teacher_dashboard():
         groups_by_id=groups_by_id,
         subject_averages=subject_averages,
         period=period,
+        semester_filter=semester_filter,
         search_query=search_query,
+        teacher_stats=teacher_stats,
         page=page,
         total_pages=total_pages,
         total_recent_grades=total_recent_grades
@@ -961,9 +1154,9 @@ def export_teacher_grades():
 
     stream = io.StringIO()
     writer = csv.writer(stream)
-    writer.writerow(['student', 'subject', 'grade', 'comment', 'graded_at'])
+    writer.writerow(['student', 'subject', 'grade', 'semester', 'comment', 'graded_at'])
     for item in grades:
-        writer.writerow([item.student.name, item.subject.name, item.grade, item.comment or '', item.graded_at.isoformat() if item.graded_at else ''])
+        writer.writerow([item.student.name, item.subject.name, item.grade, item.semester, item.comment or '', item.graded_at.isoformat() if item.graded_at else ''])
 
     return Response(
         stream.getvalue(),
@@ -1015,6 +1208,7 @@ def admin_dashboard():
     all_groups = Group.query.order_by(Group.name).all()
     all_subjects = Subject.query.order_by(Subject.name).all()
     recent_audit = AuditLog.query.order_by(AuditLog.id.desc()).limit(40).all()
+    latest_schedule = get_latest_schedule_file()
 
     return render_template(
         'admin_dashboard.html',
@@ -1030,6 +1224,7 @@ def admin_dashboard():
         all_groups=all_groups,
         all_subjects=all_subjects,
         recent_audit=recent_audit,
+        latest_schedule=latest_schedule,
         can_manage=current_user.role == 'admin',
         page=page,
         total_pages=total_pages,
@@ -1293,6 +1488,35 @@ def admin_delete_subject(subject_id):
     log_audit('delete_subject', f'id={subject_id}')
     flash('Предмет удалён')
     return redirect(url_for('admin_dashboard'))
+
+
+
+
+@app.route('/admin/backup-db')
+@login_required
+def admin_backup_db():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not db_uri.startswith('sqlite:///'):
+        flash('Автобэкап доступен только для SQLite в этой сборке')
+        return redirect(url_for('admin_dashboard'))
+
+    source_rel = db_uri.replace('sqlite:///', '', 1)
+    source_path = os.path.join(app.root_path, source_rel)
+    if not os.path.exists(source_path):
+        source_path = os.path.join(app.instance_path, 'site.db')
+
+    backup_dir = os.path.join(app.instance_path, 'backups')
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    backup_name = f'site_{stamp}.db'
+    backup_path = os.path.join(backup_dir, backup_name)
+    shutil.copy2(source_path, backup_path)
+    log_audit('backup_db', f'file={backup_name}')
+
+    return send_from_directory(backup_dir, backup_name, as_attachment=True)
 
 
 @app.route('/admin/export-users')

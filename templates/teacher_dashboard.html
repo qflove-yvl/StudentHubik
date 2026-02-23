@@ -2,9 +2,11 @@
 {% block content %}
 
 {% set period_safe = period|default('all') %}
+{% set semester_filter_safe = semester_filter|default('all') %}
 {% set page_safe = page|default(1) %}
 {% set total_pages_safe = total_pages|default(1) %}
 {% set search_query_safe = search_query|default('') %}
+{% set teacher_stats_safe = teacher_stats|default({'semester_1_avg':0,'semester_2_avg':0,'course_avg':0}) %}
 
 <h1 class="page-title">Кабинет преподавателя</h1>
 
@@ -15,37 +17,24 @@
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:12px;">Назначенные вам предметы</h2>
     {% if subjects %}
-        <div class="subject-tags">
-            {% for subject in subjects %}
-                <span class="subject-tag">{{ subject.name }}</span>
-            {% endfor %}
-        </div>
+        <div class="subject-tags">{% for subject in subjects %}<span class="subject-tag">{{ subject.name }}</span>{% endfor %}</div>
     {% else %}
         <p class="muted-text">Админ пока не назначил вам предметы.</p>
     {% endif %}
 </section>
 
 <div class="card-grid">
-    <div class="card">
-        <div class="card-title">Предметов</div>
-        <div class="card-value">{{ subjects|length }}</div>
-    </div>
-
-    <div class="card">
-        <div class="card-title">Студентов</div>
-        <div class="card-value">{{ students|length }}</div>
-    </div>
-
-    <div class="card">
-        <div class="card-title">Последних оценок</div>
-        <div class="card-value">{{ recent_grades|length }}</div>
-    </div>
+    <div class="card"><div class="card-title">Предметов</div><div class="card-value">{{ subjects|length }}</div></div>
+    <div class="card"><div class="card-title">Студентов</div><div class="card-value">{{ students|length }}</div></div>
+    <div class="card"><div class="card-title">Оценок (страница)</div><div class="card-value">{{ recent_grades|length }}</div></div>
+    <div class="card"><div class="card-title">Средний за 1 семестр</div><div class="card-value">{{ teacher_stats_safe.semester_1_avg }}</div></div>
+    <div class="card"><div class="card-title">Средний за 2 семестр</div><div class="card-value">{{ teacher_stats_safe.semester_2_avg }}</div></div>
+    <div class="card"><div class="card-title">Средний за курс</div><div class="card-value">{{ teacher_stats_safe.course_avg }}</div></div>
 </div>
 
 <div class="panel-grid">
     <section class="card form-card">
         <h2>Выставить новую оценку</h2>
-
         {% if not subjects %}
             <p class="muted-text">Нет доступных предметов. Обратитесь к администратору.</p>
         {% else %}
@@ -64,35 +53,36 @@
                 <label class="field-label" for="subject_id">Предмет</label>
                 <select name="subject_id" id="subject_id" class="input-field" required>
                     <option value="" disabled selected>Выберите предмет</option>
-                    {% for subject in subjects %}
-                        <option value="{{ subject.id }}">{{ subject.name }}</option>
-                    {% endfor %}
+                    {% for subject in subjects %}<option value="{{ subject.id }}">{{ subject.name }}</option>{% endfor %}
                 </select>
 
                 <label class="field-label" for="value">Оценка</label>
                 <input type="number" min="1" max="5" name="value" id="value" class="input-field" required>
 
+                <label class="field-label" for="semester_new">Семестр</label>
+                <select name="semester" id="semester_new" class="input-field" required>
+                    <option value="1">1 семестр</option>
+                    <option value="2">2 семестр</option>
+                </select>
+
                 <label class="field-label" for="comment">Комментарий (необязательно)</label>
                 <textarea name="comment" id="comment" class="input-field" rows="3" maxlength="300" placeholder="Например: контрольная, пересдача, активность на паре"></textarea>
 
                 <button type="submit" class="btn">Добавить оценку</button>
-                <p class="muted-text hint-text">Теперь можно ставить несколько оценок по одному предмету, как в электронном дневнике.</p>
+                <p class="muted-text hint-text">Оценка сразу отправится студенту в уведомления.</p>
             </form>
         {% endif %}
         {% if total_pages_safe > 1 %}
         <div class="pager">
             {% for p in range(1, total_pages_safe + 1) %}
-                <a class="pager-link{% if p == page_safe %} active{% endif %}" href="{{ url_for('teacher_dashboard', period=period_safe, q=search_query_safe, page=p) }}">{{ p }}</a>
+                <a class="pager-link{% if p == page_safe %} active{% endif %}" href="{{ url_for('teacher_dashboard', period=period_safe, semester=semester_filter_safe, q=search_query_safe, page=p) }}">{{ p }}</a>
             {% endfor %}
         </div>
         {% endif %}
-
     </section>
 
     <section class="card list-card">
         <h2>Последние оценки (редактирование и удаление)</h2>
-
-        
         <form method="GET" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
             <div>
                 <label class="field-label" for="q">Поиск</label>
@@ -106,6 +96,14 @@
                     <option value="week" {% if period_safe == 'week' %}selected{% endif %}>Последняя неделя</option>
                 </select>
             </div>
+            <div>
+                <label class="field-label" for="semester">Семестр</label>
+                <select id="semester" name="semester" class="input-field" style="margin:0;min-width:160px;">
+                    <option value="all" {% if semester_filter_safe == 'all' %}selected{% endif %}>Оба семестра</option>
+                    <option value="1" {% if semester_filter_safe == '1' %}selected{% endif %}>1 семестр</option>
+                    <option value="2" {% if semester_filter_safe == '2' %}selected{% endif %}>2 семестр</option>
+                </select>
+            </div>
             <button class="btn" type="submit">Фильтр</button>
         </form>
 
@@ -114,40 +112,27 @@
         {% if recent_grades %}
         <div class="table-wrap">
             <table class="grade-table" id="grade-table">
-                <thead>
-                    <tr>
-                        <th>Студент</th>
-                        <th>Предмет</th>
-                        <th>Оценка</th>
-                        <th>Комментарий</th>
-                        <th>Выставлена</th>
-                        <th>Действия</th>
-                    </tr>
-                </thead>
+                <thead><tr><th>Студент</th><th>Предмет</th><th>Оценка</th><th>Семестр</th><th>Комментарий</th><th>Выставлена</th><th>Действия</th></tr></thead>
                 <tbody>
                     {% for item in recent_grades %}
                     <tr>
                         <td>{{ item.student.name }}</td>
                         <td>{{ item.subject.name }}</td>
+                        <td><input type="number" min="1" max="5" name="value" form="update-grade-{{ item.id }}" class="input-field" style="margin:0;max-width:78px;" value="{{ item.grade }}" required></td>
                         <td>
-                            <input type="number" min="1" max="5" name="value" form="update-grade-{{ item.id }}" class="input-field" style="margin:0;max-width:78px;" value="{{ item.grade }}" required>
+                            <select name="semester" form="update-grade-{{ item.id }}" class="input-field" style="margin:0;max-width:130px;">
+                                <option value="1" {% if item.semester == 1 %}selected{% endif %}>1</option>
+                                <option value="2" {% if item.semester == 2 %}selected{% endif %}>2</option>
+                            </select>
                         </td>
-                        <td>
-                            <input type="text" name="comment" form="update-grade-{{ item.id }}" class="input-field" style="margin:0;min-width:220px;" value="{{ item.comment or '' }}" maxlength="300" placeholder="Комментарий">
-                        </td>
+                        <td><input type="text" name="comment" form="update-grade-{{ item.id }}" class="input-field" style="margin:0;min-width:220px;" value="{{ item.comment or '' }}" maxlength="300" placeholder="Комментарий"></td>
                         <td>{{ item.graded_at.strftime('%d.%m.%Y %H:%M') if item.graded_at else '—' }}</td>
                         <td style="white-space:nowrap;">
                             <form id="update-grade-{{ item.id }}" method="POST" style="display:inline-block;">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <input type="hidden" name="action" value="update_grade">
-                                <input type="hidden" name="grade_id" value="{{ item.id }}">
-                                <button class="btn" type="submit">Сохранить</button>
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="update_grade"><input type="hidden" name="grade_id" value="{{ item.id }}"><button class="btn" type="submit">Сохранить</button>
                             </form>
                             <form method="POST" style="display:inline-block;margin-top:6px;">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <input type="hidden" name="action" value="delete_grade">
-                                <input type="hidden" name="grade_id" value="{{ item.id }}">
-                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete_grade"><input type="hidden" name="grade_id" value="{{ item.id }}"><button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>
                             </form>
                         </td>
                     </tr>
@@ -166,34 +151,26 @@
     {% if subjects %}
     <div class="table-wrap">
         <table class="grade-table">
-            <thead>
-                <tr>
-                    <th>Предмет</th>
-                    <th>Средний балл</th>
-                </tr>
-            </thead>
+            <thead><tr><th>Предмет</th><th>Средний балл</th></tr></thead>
             <tbody>
                 {% for subject in subjects %}
-                <tr>
-                    <td>{{ subject.name }}</td>
-                    <td>{{ subject_averages.get(subject.id) if subject_averages.get(subject.id) is not none else '—' }}</td>
-                </tr>
+                <tr><td>{{ subject.name }}</td><td><span class="badge">{{ subject_averages.get(subject.id, 0) or 0 }}</span></td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    {% else %}
+        <p class="muted-text">Пока нет предметов для статистики.</p>
     {% endif %}
 </section>
 
 <script>
-const searchInput = document.getElementById('grade-search');
+const gradeSearch = document.getElementById('grade-search');
 const gradeTable = document.getElementById('grade-table');
-
-if (searchInput && gradeTable) {
-    searchInput.addEventListener('input', () => {
-        const query = searchInput.value.toLowerCase().trim();
+if (gradeSearch && gradeTable) {
+    gradeSearch.addEventListener('input', () => {
+        const query = gradeSearch.value.toLowerCase().trim();
         const rows = gradeTable.querySelectorAll('tbody tr');
-
         rows.forEach((row) => {
             const text = row.innerText.toLowerCase();
             row.style.display = text.includes(query) ? '' : 'none';

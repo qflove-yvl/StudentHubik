@@ -14,9 +14,31 @@
 
 <div class="dashboard-actions">
     <a href="{{ url_for('export_all_users') }}" class="btn">Экспорт всех пользователей (CSV)</a>
+    {% if can_manage_safe %}<a href="{{ url_for('admin_backup_db') }}" class="btn" style="margin-left:8px;">Скачать бэкап БД</a>{% endif %}
 </div>
 
 {% if total_pages_safe > 1 %}<div class="pager" style="margin-bottom:12px;">{% for p in range(1, total_pages_safe + 1) %}<a class="pager-link{% if p == page_safe %} active{% endif %}" href="{{ url_for('admin_dashboard', q=query_safe, role=role_filter_safe, status=status_filter_safe, group_id=group_filter_safe, page=p) }}">{{ p }}</a>{% endfor %}</div>{% endif %}
+
+
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Расписание колледжа</h2>
+    {% if latest_schedule %}
+        <p class="muted-text" style="margin-bottom:10px;">Текущий файл: <strong>{{ latest_schedule.original_name }}</strong> ({{ latest_schedule.uploaded_at.strftime('%d.%m.%Y %H:%M') }})</p>
+        <a href="{{ url_for('download_schedule', file_id=latest_schedule.id) }}" class="btn" style="margin-bottom:12px;">Скачать текущее расписание</a>
+    {% else %}
+        <p class="muted-text" style="margin-bottom:10px;">Расписание ещё не загружено.</p>
+    {% endif %}
+
+    {% if can_manage_safe %}
+    <form method="POST" action="{{ url_for('admin_upload_schedule') }}" enctype="multipart/form-data" style="max-width:520px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="field-label" for="schedule_file">Загрузить файл расписания (PDF/XLSX/DOCX)</label>
+        <input id="schedule_file" type="file" name="schedule_file" class="input-field" required>
+        <button class="btn" type="submit">Обновить расписание</button>
+    </form>
+    {% endif %}
+</section>
 
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Поиск и фильтры</h2>

@@ -32,3 +32,20 @@ If password-reset emails are not delivered, check:
 
 In non-production environments, set `DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL=1`
 to show a temporary reset link in flash messages when email sending fails.
+
+## Schedules
+- Admin uploads schedule from `/admin`.
+- All authenticated users can open `/schedule` and download current/previous files.
+
+## Backup and restore
+Create backup:
+```bash
+./scripts/backup_db.sh instance/site.db backups
+```
+
+Restore backup:
+```bash
+./scripts/restore_db.sh backups/site_YYYYMMDD_HHMMSS.db instance/site.db
+```
+
+Recommended: run backup daily and test restore weekly.
