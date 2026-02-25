@@ -558,7 +558,10 @@ def read_excel_as_sheets(file_path):
 
     if extension == '.xls':
         if not xlrd:
-            raise RuntimeError('Не установлен xlrd для чтения .xls')
+            raise RuntimeError(
+                'Для чтения .xls нужен пакет xlrd==1.2.0. '
+                'Установите: pip install xlrd==1.2.0 или сохраните файл как .xlsx.'
+            )
         workbook = xlrd.open_workbook(file_path, formatting_info=False)
         sheets = []
         for sheet in workbook.sheets():
@@ -803,7 +806,7 @@ def initialize_database():
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 
 @app.route('/')
@@ -1220,7 +1223,11 @@ def admin_upload_schedule():
         if os.path.exists(full_path):
             os.remove(full_path)
         app.logger.exception('schedule_parse_failed: %s', error)
-        flash(f'Не удалось обработать Excel: {error}')
+        error_text = str(error)
+        if 'xlrd' in error_text.lower() and '.xls' in error_text:
+            flash('Не установлен пакет для .xls. Выполните: pip install xlrd==1.2.0 и перезапустите сервер, либо сохраните файл как .xlsx')
+        else:
+            flash(f'Не удалось обработать Excel: {error_text}')
         return redirect(url_for('admin_dashboard'))
 
     if not parsed_lessons:

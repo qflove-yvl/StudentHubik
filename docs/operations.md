@@ -53,6 +53,7 @@ Recommended: run backup daily and test restore weekly.
 
 ## Excel schedule parsing
 - Upload weekly schedule from admin panel in `.xls` or `.xlsx`.
+- If uploading `.xls` fails, install parser dependency exactly: `pip install xlrd==1.2.0` and restart the app.
 - System parses sheet tabs, groups, weekday blocks, and lesson pairs (`1+2`, `3+4`, etc.).
 - Published week becomes active for all users; previous files remain in history.
 - Admin can manually edit parsed lesson text from `/schedule` if needed.
