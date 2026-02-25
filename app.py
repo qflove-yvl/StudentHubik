@@ -490,9 +490,13 @@ DAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четв
 DAY_ALIASES = {
     'ПОНЕДЕЛЬНИК': 'Понедельник',
     'ВТОРНИК': 'Вторник',
+    'ВТОРН': 'Вторник',
     'СРЕДА': 'Среда',
+    'СРЕД': 'Среда',
     'ЧЕТВЕРГ': 'Четверг',
+    'ЧЕТВ': 'Четверг',
     'ПЯТНИЦА': 'Пятница',
+    'ПЯТН': 'Пятница',
     'СУББОТА': 'Суббота',
 }
 PAIR_TIME_RANGES = {
@@ -590,8 +594,9 @@ def parse_schedule_matrix(sheet_name, matrix):
     if max_cols == 0:
         return []
 
+    # В реальных файлах заголовки групп могут быть далеко от начала листа.
     group_columns_candidates = {}
-    max_rows_for_header = min(18, len(matrix))
+    max_rows_for_header = min(60, len(matrix))
     for row_idx in range(max_rows_for_header):
         for col_idx in range(max_cols):
             value = matrix[row_idx][col_idx] if col_idx < len(matrix[row_idx]) else ''
@@ -615,31 +620,45 @@ def parse_schedule_matrix(sheet_name, matrix):
     if not groups:
         return []
 
+    def extract_slot_number(cells):
+        for cell_value in cells:
+            match = re.search(r'\b(1[0-4]|[1-9])\b', cell_value)
+            if match:
+                slot = int(match.group(1))
+                if 1 <= slot <= 14:
+                    return slot
+        return None
+
     lesson_map = {}
     current_day = ''
+    inferred_day_idx = 0
+    previous_slot = None
 
     for row_idx in range(header_row_idx + 1, len(matrix)):
         row = matrix[row_idx]
-        left_cells = [normalize_cell_value(row[c]) if c < len(row) else '' for c in range(min(3, max_cols))]
+        left_cells = [normalize_cell_value(row[c]) if c < len(row) else '' for c in range(min(4, max_cols))]
 
         for left_cell in left_cells:
-            upper_cell = left_cell.upper()
+            upper_cell = left_cell.upper().replace('.', '').strip()
             for alias, normalized_day in DAY_ALIASES.items():
                 if alias in upper_cell:
                     current_day = normalized_day
+                    if normalized_day in DAY_NAMES:
+                        inferred_day_idx = DAY_NAMES.index(normalized_day)
                     break
 
-        slot_number = None
-        for left_cell in left_cells:
-            if left_cell.isdigit():
-                value = int(left_cell)
-                if 1 <= value <= 14:
-                    slot_number = value
-                    break
-
-        if not current_day or not slot_number:
+        slot_number = extract_slot_number(left_cells)
+        if slot_number is None:
             continue
 
+        # Если явного дня нет, определяем день по переходу с больших пар на 1.
+        if not current_day:
+            current_day = DAY_NAMES[min(inferred_day_idx, len(DAY_NAMES) - 1)]
+        elif previous_slot and slot_number < previous_slot and slot_number <= 2:
+            inferred_day_idx = min(inferred_day_idx + 1, len(DAY_NAMES) - 1)
+            current_day = DAY_NAMES[inferred_day_idx]
+
+        previous_slot = slot_number
         pair_number = (slot_number + 1) // 2
         half_key = 1 if slot_number % 2 == 1 else 2
 
@@ -1234,7 +1253,7 @@ def admin_upload_schedule():
         db.session.rollback()
         if os.path.exists(full_path):
             os.remove(full_path)
-        flash('Не удалось найти данные расписания в файле. Проверьте структуру Excel.')
+        flash('Не удалось распознать структуру Excel. Проверьте, что это недельное расписание с названиями групп и нумерацией пар 1-14, либо сохраните файл в .xlsx и попробуйте снова.')
         return redirect(url_for('admin_dashboard'))
 
     ScheduleWeek.query.update({'is_active': False})
