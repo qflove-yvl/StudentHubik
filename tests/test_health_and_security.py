@@ -50,3 +50,31 @@ def test_ready_endpoint(client):
 def test_csrf_rejects_post_without_token(client):
     response = client.post('/login', data={'email': 'none@test.local', 'password': 'bad'})
     assert response.status_code == 400
+
+
+def test_parse_schedule_matrix_handles_multiple_group_headers(tmp_path):
+    _ = _build_test_app(tmp_path)
+    import app as app_module
+
+    matrix = [
+        ['','','','','','',''],
+        ['', 'ИС24-01', '', 'ИС24-02', '', 'ИС24-03', ''],
+        ['ПОНЕДЕЛЬНИК', '', '', '', '', '', ''],
+        ['1', 'МАТЕМАТИКА', '', 'ФИЗИКА', '', 'ХИМИЯ', ''],
+        ['2', 'МАТЕМАТИКА', '', 'ФИЗИКА', '', 'ХИМИЯ', ''],
+        ['', '', '', '', '', '', ''],
+        ['', 'МР25-01-1', '', 'МР25-01-2', '', 'МР25-01-3', ''],
+        ['ВТОРН.', '', '', '', '', '', ''],
+        ['1', 'ИНФОРМАТИКА', '', 'РУССКИЙ ЯЗЫК', '', 'ИСТОРИЯ', ''],
+        ['2', 'ИНФОРМАТИКА', '', 'РУССКИЙ ЯЗЫК', '', 'ИСТОРИЯ', ''],
+    ]
+
+    rows = app_module.parse_schedule_matrix('ИС', matrix)
+    groups = {item['group_name'] for item in rows}
+
+    assert 'ИС24-01' in groups
+    assert 'ИС24-02' in groups
+    assert 'ИС24-03' in groups
+    assert 'МР25-01-1' in groups
+    assert 'МР25-01-2' in groups
+    assert 'МР25-01-3' in groups

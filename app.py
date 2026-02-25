@@ -519,13 +519,25 @@ def normalize_cell_value(value):
 
 def looks_like_group_name(text_value):
     candidate = normalize_cell_value(text_value).upper()
-    if len(candidate) < 5 or len(candidate) > 25:
+    if len(candidate) < 4 or len(candidate) > 32:
         return False
-    if ' ' in candidate:
+    if any(ch in candidate for ch in ['|', '=', '+', '*']):
         return False
-    if '-' not in candidate:
+    if not any(ch.isdigit() for ch in candidate):
         return False
-    return any(ch.isdigit() for ch in candidate)
+    if not any(('А' <= ch <= 'Я') or ('A' <= ch <= 'Z') for ch in candidate):
+        return False
+
+    # Группы в расписании почти всегда имеют дефисы/слеши или буквенно-цифровой формат,
+    # например: ИС24-01/2, МР25-01-1П, ТД-23.
+    separators = candidate.count('-') + candidate.count('/')
+    if separators == 0 and not re.search(r'[А-ЯA-Z]{1,4}\d{2}', candidate):
+        return False
+
+    # Убираем типичные не-групповые подписи (время, кабинеты и т.п.)
+    if re.fullmatch(r'\d{1,2}[:.]\d{2}', candidate):
+        return False
+    return True
 
 
 def parse_week_title_from_filename(filename):
@@ -594,31 +606,20 @@ def parse_schedule_matrix(sheet_name, matrix):
     if max_cols == 0:
         return []
 
-    # В реальных файлах заголовки групп могут быть далеко от начала листа.
-    group_columns_candidates = {}
-    max_rows_for_header = min(60, len(matrix))
-    for row_idx in range(max_rows_for_header):
+    def extract_groups_from_row(row):
+        candidates = []
         for col_idx in range(max_cols):
-            value = matrix[row_idx][col_idx] if col_idx < len(matrix[row_idx]) else ''
+            value = normalize_cell_value(row[col_idx]) if col_idx < len(row) else ''
             if looks_like_group_name(value):
-                group_columns_candidates.setdefault(row_idx, []).append(col_idx)
+                candidates.append((value.upper(), col_idx))
 
-    if not group_columns_candidates:
-        return []
-
-    header_row_idx = max(group_columns_candidates.keys(), key=lambda idx: len(set(group_columns_candidates[idx])))
-    group_columns = sorted(set(group_columns_candidates.get(header_row_idx, [])))
-    if not group_columns:
-        return []
-
-    groups = []
-    for col_idx in group_columns:
-        group_name = normalize_cell_value(matrix[header_row_idx][col_idx]).upper()
-        if group_name:
-            groups.append((group_name, col_idx))
-
-    if not groups:
-        return []
+        # Убираем дубли merged-ячеек подряд
+        unique = []
+        for name, col in candidates:
+            if unique and unique[-1][0] == name and abs(unique[-1][1] - col) <= 1:
+                continue
+            unique.append((name, col))
+        return unique
 
     def extract_slot_number(cells):
         for cell_value in cells:
@@ -629,14 +630,36 @@ def parse_schedule_matrix(sheet_name, matrix):
                     return slot
         return None
 
+    # В одном листе может быть несколько блоков с разными строками заголовков групп.
+    header_rows = {}
+    for row_idx in range(len(matrix)):
+        groups_here = extract_groups_from_row(matrix[row_idx])
+        if len(groups_here) >= 2:
+            header_rows[row_idx] = groups_here
+
+    if not header_rows:
+        return []
+
     lesson_map = {}
     current_day = ''
     inferred_day_idx = 0
     previous_slot = None
+    active_groups = []
 
-    for row_idx in range(header_row_idx + 1, len(matrix)):
+    for row_idx in range(len(matrix)):
         row = matrix[row_idx]
-        left_cells = [normalize_cell_value(row[c]) if c < len(row) else '' for c in range(min(4, max_cols))]
+
+        # Если встретили новую строку заголовков групп — переключаем контекст.
+        if row_idx in header_rows:
+            active_groups = sorted(header_rows[row_idx], key=lambda x: x[1])
+            current_day = ''
+            previous_slot = None
+            continue
+
+        if not active_groups:
+            continue
+
+        left_cells = [normalize_cell_value(row[c]) if c < len(row) else '' for c in range(min(5, max_cols))]
 
         for left_cell in left_cells:
             upper_cell = left_cell.upper().replace('.', '').strip()
@@ -651,7 +674,6 @@ def parse_schedule_matrix(sheet_name, matrix):
         if slot_number is None:
             continue
 
-        # Если явного дня нет, определяем день по переходу с больших пар на 1.
         if not current_day:
             current_day = DAY_NAMES[min(inferred_day_idx, len(DAY_NAMES) - 1)]
         elif previous_slot and slot_number < previous_slot and slot_number <= 2:
@@ -662,8 +684,8 @@ def parse_schedule_matrix(sheet_name, matrix):
         pair_number = (slot_number + 1) // 2
         half_key = 1 if slot_number % 2 == 1 else 2
 
-        for idx, (group_name, start_col) in enumerate(groups):
-            end_col = groups[idx + 1][1] if idx + 1 < len(groups) else max_cols
+        for idx, (group_name, start_col) in enumerate(active_groups):
+            end_col = active_groups[idx + 1][1] if idx + 1 < len(active_groups) else max_cols
             segment_values = []
             for c in range(start_col, end_col):
                 if c >= len(row):
@@ -710,7 +732,12 @@ def parse_schedule_matrix(sheet_name, matrix):
             'content_half_2': half_2,
         })
 
-    results.sort(key=lambda item: (item['sheet_name'], item['group_name'], DAY_NAMES.index(item['day_name']) if item['day_name'] in DAY_NAMES else 99, item['pair_number']))
+    results.sort(key=lambda item: (
+        item['sheet_name'],
+        item['group_name'],
+        DAY_NAMES.index(item['day_name']) if item['day_name'] in DAY_NAMES else 99,
+        item['pair_number']
+    ))
     return results
 
 
