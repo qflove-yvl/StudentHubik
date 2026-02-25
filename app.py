@@ -21,10 +21,19 @@ from logging.handlers import RotatingFileHandler
 from sqlalchemy import func, inspect, text
 
 try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+
+try:
+    import xlrd
+except ImportError:
+    xlrd = None
+
+try:
     import sentry_sdk
 except ImportError:  # optional dependency in local dev
     sentry_sdk = None
-
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///site.db')
@@ -152,6 +161,33 @@ class ScheduleFile(db.Model):
     uploaded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     uploaded_by = db.relationship('User')
+
+
+class ScheduleWeek(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(120), nullable=False)
+    source_file_id = db.Column(db.Integer, db.ForeignKey('schedule_file.id'), nullable=False)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    source_file = db.relationship('ScheduleFile')
+    uploaded_by = db.relationship('User', foreign_keys=[uploaded_by_id])
+
+
+class ScheduleLesson(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    week_id = db.Column(db.Integer, db.ForeignKey('schedule_week.id'), nullable=False, index=True)
+    sheet_name = db.Column(db.String(50), nullable=False)
+    group_name = db.Column(db.String(60), nullable=False, index=True)
+    day_name = db.Column(db.String(20), nullable=False)
+    pair_number = db.Column(db.Integer, nullable=False)
+    time_range = db.Column(db.String(30), nullable=False)
+    content = db.Column(db.String(600), nullable=False)
+    content_half_1 = db.Column(db.String(400), default='')
+    content_half_2 = db.Column(db.String(400), default='')
+
+    week = db.relationship('ScheduleWeek', backref='lessons')
 
 
 def ensure_default_groups():
@@ -444,6 +480,231 @@ def get_unread_notifications_count(user_id):
 
 def get_latest_schedule_file():
     return ScheduleFile.query.order_by(ScheduleFile.uploaded_at.desc(), ScheduleFile.id.desc()).first()
+
+
+def get_active_schedule_week():
+    return ScheduleWeek.query.filter_by(is_active=True).order_by(ScheduleWeek.created_at.desc(), ScheduleWeek.id.desc()).first()
+
+
+DAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
+DAY_ALIASES = {
+    'ПОНЕДЕЛЬНИК': 'Понедельник',
+    'ВТОРНИК': 'Вторник',
+    'СРЕДА': 'Среда',
+    'ЧЕТВЕРГ': 'Четверг',
+    'ПЯТНИЦА': 'Пятница',
+    'СУББОТА': 'Суббота',
+}
+PAIR_TIME_RANGES = {
+    1: '08:15–09:40',
+    2: '09:45–11:10',
+    3: '11:15–12:40',
+    4: '13:10–14:35',
+    5: '14:40–16:05',
+    6: '16:10–17:35',
+    7: '17:40–19:05',
+}
+
+
+def normalize_cell_value(value):
+    if value is None:
+        return ''
+    text_value = str(value).replace('\n', ' ').replace('\r', ' ')
+    return re.sub(r'\s+', ' ', text_value).strip()
+
+
+def looks_like_group_name(text_value):
+    candidate = normalize_cell_value(text_value).upper()
+    if len(candidate) < 5 or len(candidate) > 25:
+        return False
+    if ' ' in candidate:
+        return False
+    if '-' not in candidate:
+        return False
+    return any(ch.isdigit() for ch in candidate)
+
+
+def parse_week_title_from_filename(filename):
+    match = re.search(r'(\d{1,2}[.-]\d{1,2}\s*[-–]\s*\d{1,2}[.-]\d{1,2})', filename)
+    if match:
+        return f'Неделя {match.group(1).replace(" ", "")}'
+    return f'Неделя от {datetime.utcnow().strftime("%d.%m.%Y")}'
+
+
+def read_excel_as_sheets(file_path):
+    extension = os.path.splitext(file_path)[1].lower()
+    if extension == '.xlsx':
+        if not openpyxl:
+            raise RuntimeError('Не установлен openpyxl для чтения .xlsx')
+        workbook = openpyxl.load_workbook(file_path, data_only=True)
+        sheets = []
+        for worksheet in workbook.worksheets:
+            max_row = worksheet.max_row or 0
+            max_col = worksheet.max_column or 0
+            matrix = [['' for _ in range(max_col)] for _ in range(max_row)]
+            for row_idx in range(1, max_row + 1):
+                for col_idx in range(1, max_col + 1):
+                    matrix[row_idx - 1][col_idx - 1] = normalize_cell_value(worksheet.cell(row=row_idx, column=col_idx).value)
+
+            for merged_range in worksheet.merged_cells.ranges:
+                min_col, min_row, max_col_m, max_row_m = merged_range.bounds
+                top_left = matrix[min_row - 1][min_col - 1]
+                for r in range(min_row - 1, max_row_m):
+                    for c in range(min_col - 1, max_col_m):
+                        if not matrix[r][c]:
+                            matrix[r][c] = top_left
+            sheets.append((worksheet.title, matrix))
+        return sheets
+
+    if extension == '.xls':
+        if not xlrd:
+            raise RuntimeError('Не установлен xlrd для чтения .xls')
+        workbook = xlrd.open_workbook(file_path, formatting_info=False)
+        sheets = []
+        for sheet in workbook.sheets():
+            matrix = []
+            for row_idx in range(sheet.nrows):
+                row = [normalize_cell_value(sheet.cell_value(row_idx, col_idx)) for col_idx in range(sheet.ncols)]
+                matrix.append(row)
+
+            for rlo, rhi, clo, chi in sheet.merged_cells:
+                top_left = matrix[rlo][clo] if rlo < len(matrix) and clo < len(matrix[rlo]) else ''
+                for r in range(rlo, rhi):
+                    for c in range(clo, chi):
+                        if r < len(matrix) and c < len(matrix[r]) and not matrix[r][c]:
+                            matrix[r][c] = top_left
+            sheets.append((sheet.name, matrix))
+        return sheets
+
+    raise RuntimeError('Поддерживаются только файлы .xls и .xlsx')
+
+
+def parse_schedule_matrix(sheet_name, matrix):
+    if not matrix:
+        return []
+
+    max_cols = max((len(row) for row in matrix), default=0)
+    if max_cols == 0:
+        return []
+
+    group_columns_candidates = {}
+    max_rows_for_header = min(18, len(matrix))
+    for row_idx in range(max_rows_for_header):
+        for col_idx in range(max_cols):
+            value = matrix[row_idx][col_idx] if col_idx < len(matrix[row_idx]) else ''
+            if looks_like_group_name(value):
+                group_columns_candidates.setdefault(row_idx, []).append(col_idx)
+
+    if not group_columns_candidates:
+        return []
+
+    header_row_idx = max(group_columns_candidates.keys(), key=lambda idx: len(set(group_columns_candidates[idx])))
+    group_columns = sorted(set(group_columns_candidates.get(header_row_idx, [])))
+    if not group_columns:
+        return []
+
+    groups = []
+    for col_idx in group_columns:
+        group_name = normalize_cell_value(matrix[header_row_idx][col_idx]).upper()
+        if group_name:
+            groups.append((group_name, col_idx))
+
+    if not groups:
+        return []
+
+    lesson_map = {}
+    current_day = ''
+
+    for row_idx in range(header_row_idx + 1, len(matrix)):
+        row = matrix[row_idx]
+        left_cells = [normalize_cell_value(row[c]) if c < len(row) else '' for c in range(min(3, max_cols))]
+
+        for left_cell in left_cells:
+            upper_cell = left_cell.upper()
+            for alias, normalized_day in DAY_ALIASES.items():
+                if alias in upper_cell:
+                    current_day = normalized_day
+                    break
+
+        slot_number = None
+        for left_cell in left_cells:
+            if left_cell.isdigit():
+                value = int(left_cell)
+                if 1 <= value <= 14:
+                    slot_number = value
+                    break
+
+        if not current_day or not slot_number:
+            continue
+
+        pair_number = (slot_number + 1) // 2
+        half_key = 1 if slot_number % 2 == 1 else 2
+
+        for idx, (group_name, start_col) in enumerate(groups):
+            end_col = groups[idx + 1][1] if idx + 1 < len(groups) else max_cols
+            segment_values = []
+            for c in range(start_col, end_col):
+                if c >= len(row):
+                    continue
+                value = normalize_cell_value(row[c])
+                if value and not looks_like_group_name(value):
+                    segment_values.append(value)
+
+            if not segment_values:
+                continue
+
+            unique_values = []
+            for value in segment_values:
+                if value not in unique_values:
+                    unique_values.append(value)
+
+            payload = ' | '.join(unique_values)[:390]
+            map_key = (sheet_name, group_name, current_day, pair_number)
+            lesson_map.setdefault(map_key, {1: '', 2: ''})
+            if payload:
+                previous = lesson_map[map_key][half_key]
+                lesson_map[map_key][half_key] = payload if not previous else f'{previous} / {payload}'[:390]
+
+    results = []
+    for (sheet_value, group_name, day_name, pair_number), halves in lesson_map.items():
+        half_1 = halves.get(1, '')
+        half_2 = halves.get(2, '')
+        if half_1 and half_2 and half_1 != half_2:
+            combined = f'{half_1} || {half_2}'[:590]
+        else:
+            combined = (half_1 or half_2)[:590]
+
+        if not combined:
+            continue
+
+        results.append({
+            'sheet_name': sheet_value,
+            'group_name': group_name,
+            'day_name': day_name,
+            'pair_number': pair_number,
+            'time_range': PAIR_TIME_RANGES.get(pair_number, 'Время уточняется'),
+            'content': combined,
+            'content_half_1': half_1,
+            'content_half_2': half_2,
+        })
+
+    results.sort(key=lambda item: (item['sheet_name'], item['group_name'], DAY_NAMES.index(item['day_name']) if item['day_name'] in DAY_NAMES else 99, item['pair_number']))
+    return results
+
+
+def parse_schedule_file(file_path):
+    sheets = read_excel_as_sheets(file_path)
+    lessons = []
+    for sheet_name, matrix in sheets:
+        lessons.extend(parse_schedule_matrix(sheet_name, matrix))
+    return lessons
+
+
+def build_schedule_view(lessons):
+    grouped = {day: [] for day in DAY_NAMES}
+    for lesson in sorted(lessons, key=lambda x: (DAY_NAMES.index(x.day_name) if x.day_name in DAY_NAMES else 99, x.pair_number)):
+        grouped.setdefault(lesson.day_name, []).append(lesson)
+    return grouped
 
 
 def apply_period_filter(query, period_value):
@@ -851,7 +1112,54 @@ def mark_all_notifications_read():
 def schedule_page():
     latest_schedule = get_latest_schedule_file()
     schedule_history = ScheduleFile.query.order_by(ScheduleFile.uploaded_at.desc(), ScheduleFile.id.desc()).limit(app.config.get('MAX_SCHEDULE_HISTORY', 20)).all()
-    return render_template('schedule.html', latest_schedule=latest_schedule, schedule_history=schedule_history)
+    active_week = get_active_schedule_week()
+
+    sheet_filter = request.args.get('sheet', 'all')
+    group_filter = request.args.get('group', 'my')
+    selected_group = request.args.get('group_name', '').strip().upper()
+
+    all_groups = []
+    all_sheets = []
+    lessons_query = ScheduleLesson.query
+    if active_week:
+        lessons_query = lessons_query.filter_by(week_id=active_week.id)
+        all_groups = [row[0] for row in db.session.query(ScheduleLesson.group_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.group_name).all()]
+        all_sheets = [row[0] for row in db.session.query(ScheduleLesson.sheet_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.sheet_name).all()]
+
+    if sheet_filter != 'all':
+        lessons_query = lessons_query.filter(ScheduleLesson.sheet_name == sheet_filter)
+
+    my_group = ''
+    if current_user.role == 'student' and current_user.group_id:
+        group = Group.query.get(current_user.group_id)
+        if group:
+            my_group = group.name.upper()
+
+    if group_filter == 'my' and my_group:
+        lessons_query = lessons_query.filter(ScheduleLesson.group_name == my_group)
+        selected_group = my_group
+    elif selected_group:
+        lessons_query = lessons_query.filter(ScheduleLesson.group_name == selected_group)
+    elif all_groups:
+        selected_group = all_groups[0]
+        lessons_query = lessons_query.filter(ScheduleLesson.group_name == selected_group)
+
+    lessons = lessons_query.order_by(ScheduleLesson.day_name, ScheduleLesson.pair_number).all() if active_week else []
+    schedule_grid = build_schedule_view(lessons)
+
+    return render_template(
+        'schedule.html',
+        latest_schedule=latest_schedule,
+        schedule_history=schedule_history,
+        active_week=active_week,
+        schedule_grid=schedule_grid,
+        all_groups=all_groups,
+        all_sheets=all_sheets,
+        selected_group=selected_group,
+        selected_sheet=sheet_filter,
+        group_filter_mode=group_filter,
+        my_group=my_group,
+    )
 
 
 @app.route('/schedule/file/<int:file_id>')
@@ -886,21 +1194,93 @@ def admin_upload_schedule():
         flash('Некорректное имя файла')
         return redirect(url_for('admin_dashboard'))
 
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in {'.xls', '.xlsx'}:
+        flash('Поддерживаются только Excel-файлы .xls и .xlsx')
+        return redirect(url_for('admin_dashboard'))
+
     stamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     stored_name = f'{stamp}_{safe_name}'
     full_path = os.path.join(app.config.get('SCHEDULE_UPLOAD_DIR'), stored_name)
     schedule.save(full_path)
 
-    db.session.add(ScheduleFile(
+    schedule_file = ScheduleFile(
         original_name=schedule.filename,
         stored_name=stored_name,
         uploaded_by_id=current_user.id,
         uploaded_at=datetime.utcnow()
-    ))
+    )
+    db.session.add(schedule_file)
+    db.session.flush()
+
+    try:
+        parsed_lessons = parse_schedule_file(full_path)
+    except Exception as error:
+        db.session.rollback()
+        if os.path.exists(full_path):
+            os.remove(full_path)
+        app.logger.exception('schedule_parse_failed: %s', error)
+        flash(f'Не удалось обработать Excel: {error}')
+        return redirect(url_for('admin_dashboard'))
+
+    if not parsed_lessons:
+        db.session.rollback()
+        if os.path.exists(full_path):
+            os.remove(full_path)
+        flash('Не удалось найти данные расписания в файле. Проверьте структуру Excel.')
+        return redirect(url_for('admin_dashboard'))
+
+    ScheduleWeek.query.update({'is_active': False})
+    week = ScheduleWeek(
+        title=parse_week_title_from_filename(schedule.filename),
+        source_file_id=schedule_file.id,
+        uploaded_by_id=current_user.id,
+        created_at=datetime.utcnow(),
+        is_active=True
+    )
+    db.session.add(week)
+    db.session.flush()
+
+    for row in parsed_lessons:
+        db.session.add(ScheduleLesson(
+            week_id=week.id,
+            sheet_name=row['sheet_name'][:50],
+            group_name=row['group_name'][:60],
+            day_name=row['day_name'][:20],
+            pair_number=row['pair_number'],
+            time_range=row['time_range'][:30],
+            content=row['content'][:600],
+            content_half_1=row['content_half_1'][:400],
+            content_half_2=row['content_half_2'][:400],
+        ))
+
     db.session.commit()
-    log_audit('upload_schedule', f'file={schedule.filename}')
-    flash('Расписание загружено и доступно всем пользователям')
+    log_audit('upload_schedule', f'file={schedule.filename}, lessons={len(parsed_lessons)}')
+    flash(f'Расписание обработано: {len(parsed_lessons)} записей, неделя опубликована')
     return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/schedule/lesson/<int:lesson_id>/edit', methods=['POST'])
+@login_required
+def admin_edit_schedule_lesson(lesson_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    lesson = ScheduleLesson.query.get(lesson_id)
+    if not lesson:
+        flash('Занятие не найдено')
+        return redirect(url_for('schedule_page'))
+
+    content = normalize_cell_value(request.form.get('content', ''))
+    if not content:
+        flash('Текст занятия не может быть пустым')
+        return redirect(url_for('schedule_page', group_name=lesson.group_name, sheet=lesson.sheet_name, group='all'))
+
+    lesson.content = content[:600]
+    db.session.commit()
+    log_audit('edit_schedule_lesson', f'lesson_id={lesson.id}, group={lesson.group_name}')
+    flash('Занятие обновлено вручную')
+    return redirect(url_for('schedule_page', group_name=lesson.group_name, sheet=lesson.sheet_name, group='all'))
 
 
 @app.route('/health')
@@ -1327,6 +1707,12 @@ def admin_dashboard():
     all_subjects = Subject.query.order_by(Subject.name).all()
     recent_audit = AuditLog.query.order_by(AuditLog.id.desc()).limit(40).all()
     latest_schedule = get_latest_schedule_file()
+    active_week = get_active_schedule_week()
+    active_schedule_groups = []
+    active_schedule_sheets = []
+    if active_week:
+        active_schedule_groups = [row[0] for row in db.session.query(ScheduleLesson.group_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.group_name).all()]
+        active_schedule_sheets = [row[0] for row in db.session.query(ScheduleLesson.sheet_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.sheet_name).all()]
 
     return render_template(
         'admin_dashboard.html',
@@ -1343,6 +1729,9 @@ def admin_dashboard():
         all_subjects=all_subjects,
         recent_audit=recent_audit,
         latest_schedule=latest_schedule,
+        active_week=active_week,
+        active_schedule_groups=active_schedule_groups,
+        active_schedule_sheets=active_schedule_sheets,
         can_manage=current_user.role == 'admin',
         page=page,
         total_pages=total_pages,

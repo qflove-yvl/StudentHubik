@@ -49,3 +49,10 @@ Restore backup:
 ```
 
 Recommended: run backup daily and test restore weekly.
+
+
+## Excel schedule parsing
+- Upload weekly schedule from admin panel in `.xls` or `.xlsx`.
+- System parses sheet tabs, groups, weekday blocks, and lesson pairs (`1+2`, `3+4`, etc.).
+- Published week becomes active for all users; previous files remain in history.
+- Admin can manually edit parsed lesson text from `/schedule` if needed.

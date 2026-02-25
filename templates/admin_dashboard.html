@@ -33,10 +33,15 @@
     {% if can_manage_safe %}
     <form method="POST" action="{{ url_for('admin_upload_schedule') }}" enctype="multipart/form-data" style="max-width:520px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label class="field-label" for="schedule_file">Загрузить файл расписания (PDF/XLSX/DOCX)</label>
+        <label class="field-label" for="schedule_file">Загрузить Excel-расписание (.xls / .xlsx)</label>
         <input id="schedule_file" type="file" name="schedule_file" class="input-field" required>
         <button class="btn" type="submit">Обновить расписание</button>
     </form>
+    {% endif %}
+
+    {% if active_week %}
+        <p class="muted-text" style="margin-top:10px;">Опубликовано: <strong>{{ active_week.title }}</strong>. Групп: {{ active_schedule_groups|length }}, вкладок: {{ active_schedule_sheets|length }}.</p>
+        <a href="{{ url_for('schedule_page') }}" class="btn" style="margin-top:8px;">Открыть красивый просмотр расписания</a>
     {% endif %}
 </section>
 

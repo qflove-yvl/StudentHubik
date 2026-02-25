@@ -456,3 +456,15 @@ html .main-content.no-sidebar .legal-footer {
 }
 .progress-value { font-size: 12px; font-weight: 700; }
 .progress-label { font-size: 11px; color: var(--muted); }
+
+
+.schedule-day-block {
+    margin-bottom: 18px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.schedule-day-title {
+    margin-bottom: 8px;
+    font-size: 20px;
+}
