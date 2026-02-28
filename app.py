@@ -519,7 +519,7 @@ def normalize_cell_value(value):
 
 def looks_like_group_name(text_value):
     candidate = normalize_cell_value(text_value).upper()
-    if len(candidate) < 4 or len(candidate) > 32:
+    if len(candidate) < 3 or len(candidate) > 40:
         return False
     if any(ch in candidate for ch in ['|', '=', '+', '*']):
         return False
@@ -528,16 +528,20 @@ def looks_like_group_name(text_value):
     if not any(('А' <= ch <= 'Я') or ('A' <= ch <= 'Z') for ch in candidate):
         return False
 
-    # Группы в расписании почти всегда имеют дефисы/слеши или буквенно-цифровой формат,
-    # например: ИС24-01/2, МР25-01-1П, ТД-23.
-    separators = candidate.count('-') + candidate.count('/')
-    if separators == 0 and not re.search(r'[А-ЯA-Z]{1,4}\d{2}', candidate):
+    # типичные не-групповые значения
+    banned_words = ('ПОНЕД', 'ВТОР', 'СРЕД', 'ЧЕТВ', 'ПЯТ', 'СУББ', 'ПАРА', 'КАБ', 'АУД', 'ВРЕМЯ')
+    if any(word in candidate for word in banned_words):
         return False
-
-    # Убираем типичные не-групповые подписи (время, кабинеты и т.п.)
     if re.fullmatch(r'\d{1,2}[:.]\d{2}', candidate):
         return False
-    return True
+
+    # нормальные шаблоны групп: ИС24-01/2, МР25-01-1П, ТД-23 и т.п.
+    compact = candidate.replace(' ', '')
+    if re.search(r'[А-ЯA-Z]{1,8}\d{1,3}', compact):
+        return True
+
+    separators = compact.count('-') + compact.count('/')
+    return separators >= 1
 
 
 def parse_week_title_from_filename(filename):
@@ -613,12 +617,14 @@ def parse_schedule_matrix(sheet_name, matrix):
             if looks_like_group_name(value):
                 candidates.append((value.upper(), col_idx))
 
-        # Убираем дубли merged-ячеек подряд
+        # Убираем дубли merged-ячеек подряд (в merged-блоках одно имя может тянуться на 2-5 колонок)
         unique = []
+        last_name = None
         for name, col in candidates:
-            if unique and unique[-1][0] == name and abs(unique[-1][1] - col) <= 1:
+            if name == last_name:
                 continue
             unique.append((name, col))
+            last_name = name
         return unique
 
     def extract_slot_number(cells):
@@ -1451,14 +1457,14 @@ def export_student_grades():
     grades = Grade.query.filter_by(student_id=current_user.id).all()
 
     stream = io.StringIO()
-    writer = csv.writer(stream)
+    writer = csv.writer(stream, delimiter=';')
     writer.writerow(['subject', 'grade', 'semester', 'graded_at'])
     for item in grades:
         writer.writerow([item.subject.name, item.grade, item.semester, item.graded_at.isoformat() if item.graded_at else ''])
 
     return Response(
-        stream.getvalue(),
-        mimetype='text/csv',
+        '\ufeff' + stream.getvalue(),
+        mimetype='text/csv; charset=utf-8',
         headers={'Content-Disposition': 'attachment; filename=my_grades.csv'}
     )
 
@@ -1704,14 +1710,14 @@ def export_teacher_grades():
     )
 
     stream = io.StringIO()
-    writer = csv.writer(stream)
+    writer = csv.writer(stream, delimiter=';')
     writer.writerow(['student', 'subject', 'grade', 'semester', 'comment', 'graded_at'])
     for item in grades:
         writer.writerow([item.student.name, item.subject.name, item.grade, item.semester, item.comment or '', item.graded_at.isoformat() if item.graded_at else ''])
 
     return Response(
-        stream.getvalue(),
-        mimetype='text/csv',
+        '\ufeff' + stream.getvalue(),
+        mimetype='text/csv; charset=utf-8',
         headers={'Content-Disposition': 'attachment; filename=teacher_grades.csv'}
     )
 
@@ -2088,14 +2094,14 @@ def export_all_users():
     users = User.query.order_by(User.id).all()
 
     stream = io.StringIO()
-    writer = csv.writer(stream)
+    writer = csv.writer(stream, delimiter=';')
     writer.writerow(['id', 'name', 'email', 'role', 'group_id', 'is_verified'])
     for user in users:
         writer.writerow([user.id, user.name, user.email, user.role, user.group_id or '', user.is_verified])
 
     return Response(
-        stream.getvalue(),
-        mimetype='text/csv',
+        '\ufeff' + stream.getvalue(),
+        mimetype='text/csv; charset=utf-8',
         headers={'Content-Disposition': 'attachment; filename=all_users.csv'}
     )
 
