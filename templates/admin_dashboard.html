@@ -37,6 +37,12 @@
         <input id="schedule_file" type="file" name="schedule_file" class="input-field" required>
         <button class="btn" type="submit">Обновить расписание</button>
     </form>
+    {% if latest_schedule %}
+    <form method="POST" action="{{ url_for('admin_reparse_latest_schedule') }}" style="margin-top:8px;max-width:520px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn" type="submit">Повторно обработать последний Excel (исправить парсинг)</button>
+    </form>
+    {% endif %}
     {% endif %}
 
     {% if active_week %}

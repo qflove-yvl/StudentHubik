@@ -1246,6 +1246,44 @@ def download_schedule(file_id):
     )
 
 
+def publish_parsed_schedule(source_file_id, source_filename, parsed_lessons):
+    ScheduleWeek.query.update({'is_active': False})
+    week = ScheduleWeek(
+        title=parse_week_title_from_filename(source_filename),
+        source_file_id=source_file_id,
+        uploaded_by_id=current_user.id,
+        created_at=datetime.utcnow(),
+        is_active=True
+    )
+    db.session.add(week)
+    db.session.flush()
+
+    sheet_set = set()
+    group_set = set()
+    for row in parsed_lessons:
+        content_text = row['content'][:600]
+        parts = [part.strip() for part in re.split(r'\||/', content_text) if part.strip()]
+        db.session.add(ScheduleLesson(
+            week_id=week.id,
+            sheet_name=row['sheet_name'][:50],
+            group_name=row['group_name'][:60],
+            day_name=row['day_name'][:20],
+            pair_number=row['pair_number'],
+            time_range=row['time_range'][:30],
+            subject=(parts[0] if len(parts) > 0 else '')[:200],
+            teacher_name=(parts[1] if len(parts) > 1 else '')[:150],
+            room=(parts[2] if len(parts) > 2 else '')[:60],
+            content=content_text,
+            content_half_1=row['content_half_1'][:400],
+            content_half_2=row['content_half_2'][:400],
+        ))
+        sheet_set.add(row['sheet_name'])
+        group_set.add(row['group_name'])
+
+    db.session.commit()
+    return week, len(sheet_set), len(group_set)
+
+
 @app.route('/admin/schedule/upload', methods=['POST'])
 @login_required
 def admin_upload_schedule():
@@ -1302,38 +1340,42 @@ def admin_upload_schedule():
         flash('Не удалось распознать структуру Excel. Проверьте, что это недельное расписание с названиями групп и нумерацией пар 1-14, либо сохраните файл в .xlsx и попробуйте снова.')
         return redirect(url_for('admin_dashboard'))
 
-    ScheduleWeek.query.update({'is_active': False})
-    week = ScheduleWeek(
-        title=parse_week_title_from_filename(schedule.filename),
-        source_file_id=schedule_file.id,
-        uploaded_by_id=current_user.id,
-        created_at=datetime.utcnow(),
-        is_active=True
-    )
-    db.session.add(week)
-    db.session.flush()
+    week, sheet_count, group_count = publish_parsed_schedule(schedule_file.id, schedule.filename, parsed_lessons)
+    log_audit('upload_schedule', f'file={schedule.filename}, lessons={len(parsed_lessons)}, sheets={sheet_count}, groups={group_count}')
+    flash(f'Расписание обработано: {len(parsed_lessons)} записей, вкладок: {sheet_count}, групп: {group_count}. Неделя опубликована.')
+    return redirect(url_for('admin_dashboard'))
 
-    for row in parsed_lessons:
-        content_text = row['content'][:600]
-        parts = [part.strip() for part in re.split(r'\||/', content_text) if part.strip()]
-        db.session.add(ScheduleLesson(
-            week_id=week.id,
-            sheet_name=row['sheet_name'][:50],
-            group_name=row['group_name'][:60],
-            day_name=row['day_name'][:20],
-            pair_number=row['pair_number'],
-            time_range=row['time_range'][:30],
-            subject=(parts[0] if len(parts) > 0 else '')[:200],
-            teacher_name=(parts[1] if len(parts) > 1 else '')[:150],
-            room=(parts[2] if len(parts) > 2 else '')[:60],
-            content=content_text,
-            content_half_1=row['content_half_1'][:400],
-            content_half_2=row['content_half_2'][:400],
-        ))
 
-    db.session.commit()
-    log_audit('upload_schedule', f'file={schedule.filename}, lessons={len(parsed_lessons)}')
-    flash(f'Расписание обработано: {len(parsed_lessons)} записей, неделя опубликована')
+@app.route('/admin/schedule/reparse-latest', methods=['POST'])
+@login_required
+def admin_reparse_latest_schedule():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    latest_file = get_latest_schedule_file()
+    if not latest_file:
+        flash('Нет загруженного файла расписания для повторного разбора')
+        return redirect(url_for('admin_dashboard'))
+
+    full_path = os.path.join(app.config.get('SCHEDULE_UPLOAD_DIR'), latest_file.stored_name)
+    if not os.path.exists(full_path):
+        flash('Исходный Excel-файл не найден на сервере')
+        return redirect(url_for('admin_dashboard'))
+
+    try:
+        parsed_lessons = parse_schedule_file(full_path)
+    except Exception as error:
+        app.logger.exception('schedule_reparse_failed: %s', error)
+        flash(f'Повторный разбор не удался: {error}')
+        return redirect(url_for('admin_dashboard'))
+
+    if not parsed_lessons:
+        flash('Повторный разбор не нашел занятий. Проверьте структуру Excel.')
+        return redirect(url_for('admin_dashboard'))
+
+    week, sheet_count, group_count = publish_parsed_schedule(latest_file.id, latest_file.original_name, parsed_lessons)
+    log_audit('reparse_schedule', f'file_id={latest_file.id}, week_id={week.id}, lessons={len(parsed_lessons)}, sheets={sheet_count}, groups={group_count}')
+    flash(f'Повторный разбор завершен: занятий {len(parsed_lessons)}, вкладок {sheet_count}, групп {group_count}.')
     return redirect(url_for('admin_dashboard'))
 
 
