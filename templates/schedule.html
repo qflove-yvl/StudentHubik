@@ -52,6 +52,45 @@
     {% endif %}
 </section>
 
+{% if current_user.role == 'admin' %}
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:12px;">Полный контроль расписания (админ)</h2>
+    <div class="panel-grid">
+        <div class="card" style="padding:16px;">
+            <h3 style="margin-bottom:8px;">Добавить новую группу в неделю</h3>
+            <form method="POST" action="{{ url_for('admin_add_schedule_group') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="text" name="group_name" class="input-field" placeholder="Например, ИС24-01/2" required>
+                <input type="text" name="sheet_name" class="input-field" placeholder="Вкладка/специальность (например, ИС)" required>
+                <button class="btn" type="submit">Добавить группу</button>
+            </form>
+            <form method="POST" action="{{ url_for('admin_delete_schedule_group') }}" style="margin-top:10px;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="text" name="group_name" class="input-field" placeholder="Удалить группу из недели" required>
+                <button class="btn" style="background:linear-gradient(90deg,#b91c1c,#ef4444);" type="submit">Удалить группу</button>
+            </form>
+        </div>
+
+        <div class="card" style="padding:16px;">
+            <h3 style="margin-bottom:8px;">Добавить занятие вручную</h3>
+            <form method="POST" action="{{ url_for('admin_create_schedule_lesson') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="text" name="sheet_name" class="input-field" placeholder="Вкладка" required>
+                <input type="text" name="group_name" class="input-field" placeholder="Группа" required>
+                <input type="text" name="day_name" class="input-field" placeholder="День (Понедельник...)" required>
+                <input type="number" min="1" max="7" name="pair_number" class="input-field" placeholder="№ пары" required>
+                <input type="text" name="time_range" class="input-field" placeholder="08:15–09:40" required>
+                <input type="text" name="subject" class="input-field" placeholder="Предмет">
+                <input type="text" name="teacher_name" class="input-field" placeholder="Преподаватель">
+                <input type="text" name="room" class="input-field" placeholder="Кабинет">
+                <textarea name="content" class="input-field" rows="2" placeholder="Полный текст занятия (если нужно)"></textarea>
+                <button class="btn" type="submit">Добавить занятие</button>
+            </form>
+        </div>
+    </div>
+</section>
+{% endif %}
+
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:12px;">Недельное расписание {% if selected_group %}— {{ selected_group }}{% endif %}</h2>
     {% if selected_group %}
@@ -61,19 +100,39 @@
                 {% if items %}
                     <div class="table-wrap">
                         <table class="grade-table">
-                            <thead><tr><th>Пара</th><th>Время</th><th>Занятие</th>{% if current_user.role == 'admin' %}<th>Правка</th>{% endif %}</tr></thead>
+                            <thead>
+                                <tr>
+                                    <th>Пара</th><th>Время</th><th>Предмет</th><th>Преподаватель</th><th>Кабинет</th><th>Описание</th>
+                                    {% if current_user.role == 'admin' %}<th>Управление</th>{% endif %}
+                                </tr>
+                            </thead>
                             <tbody>
                                 {% for lesson in items %}
                                 <tr>
                                     <td>{{ lesson.pair_number }}</td>
                                     <td>{{ lesson.time_range }}</td>
+                                    <td>{{ lesson.subject or '—' }}</td>
+                                    <td>{{ lesson.teacher_name or '—' }}</td>
+                                    <td>{{ lesson.room or '—' }}</td>
                                     <td>{{ lesson.content }}</td>
                                     {% if current_user.role == 'admin' %}
                                     <td>
                                         <form method="POST" action="{{ url_for('admin_edit_schedule_lesson', lesson_id=lesson.id) }}">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                            <input type="text" name="content" class="input-field" style="margin:0;min-width:260px;" value="{{ lesson.content }}" maxlength="600">
+                                            <input type="text" name="sheet_name" class="input-field" style="margin:0;min-width:140px;" value="{{ lesson.sheet_name }}" placeholder="Вкладка">
+                                            <input type="text" name="group_name" class="input-field" style="margin-top:6px;min-width:140px;" value="{{ lesson.group_name }}" placeholder="Группа">
+                                            <input type="text" name="day_name" class="input-field" style="margin-top:6px;min-width:140px;" value="{{ lesson.day_name }}" placeholder="День">
+                                            <input type="number" min="1" max="7" name="pair_number" class="input-field" style="margin-top:6px;max-width:90px;" value="{{ lesson.pair_number }}">
+                                            <input type="text" name="time_range" class="input-field" style="margin-top:6px;min-width:120px;" value="{{ lesson.time_range }}">
+                                            <input type="text" name="subject" class="input-field" style="margin-top:6px;min-width:160px;" value="{{ lesson.subject or '' }}" placeholder="Предмет">
+                                            <input type="text" name="teacher_name" class="input-field" style="margin-top:6px;min-width:160px;" value="{{ lesson.teacher_name or '' }}" placeholder="Преподаватель">
+                                            <input type="text" name="room" class="input-field" style="margin-top:6px;min-width:120px;" value="{{ lesson.room or '' }}" placeholder="Кабинет">
+                                            <input type="text" name="content" class="input-field" style="margin-top:6px;min-width:260px;" value="{{ lesson.content }}" maxlength="600">
                                             <button class="btn" style="margin-top:6px;" type="submit">Сохранить</button>
+                                        </form>
+                                        <form method="POST" action="{{ url_for('admin_delete_schedule_lesson', lesson_id=lesson.id) }}" style="margin-top:6px;">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <button class="btn" style="background:linear-gradient(90deg,#b91c1c,#ef4444);" type="submit">Удалить</button>
                                         </form>
                                     </td>
                                     {% endif %}

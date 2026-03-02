@@ -183,6 +183,9 @@ class ScheduleLesson(db.Model):
     day_name = db.Column(db.String(20), nullable=False)
     pair_number = db.Column(db.Integer, nullable=False)
     time_range = db.Column(db.String(30), nullable=False)
+    subject = db.Column(db.String(200), default='')
+    teacher_name = db.Column(db.String(150), default='')
+    room = db.Column(db.String(60), default='')
     content = db.Column(db.String(600), nullable=False)
     content_half_1 = db.Column(db.String(400), default='')
     content_half_2 = db.Column(db.String(400), default='')
@@ -275,6 +278,16 @@ def ensure_runtime_columns():
     if 'animations_enabled' not in user_columns:
         db.session.execute(text('ALTER TABLE user ADD COLUMN animations_enabled BOOLEAN DEFAULT 1'))
         db.session.execute(text('UPDATE user SET animations_enabled = 1 WHERE animations_enabled IS NULL'))
+
+    table_names = set(inspector.get_table_names())
+    if 'schedule_lesson' in table_names:
+        schedule_columns = {column['name'] for column in inspector.get_columns('schedule_lesson')}
+        if 'subject' not in schedule_columns:
+            db.session.execute(text('ALTER TABLE schedule_lesson ADD COLUMN subject VARCHAR(200) DEFAULT ""'))
+        if 'teacher_name' not in schedule_columns:
+            db.session.execute(text('ALTER TABLE schedule_lesson ADD COLUMN teacher_name VARCHAR(150) DEFAULT ""'))
+        if 'room' not in schedule_columns:
+            db.session.execute(text('ALTER TABLE schedule_lesson ADD COLUMN room VARCHAR(60) DEFAULT ""'))
 
     db.session.commit()
 
@@ -1301,6 +1314,8 @@ def admin_upload_schedule():
     db.session.flush()
 
     for row in parsed_lessons:
+        content_text = row['content'][:600]
+        parts = [part.strip() for part in re.split(r'\||/', content_text) if part.strip()]
         db.session.add(ScheduleLesson(
             week_id=week.id,
             sheet_name=row['sheet_name'][:50],
@@ -1308,7 +1323,10 @@ def admin_upload_schedule():
             day_name=row['day_name'][:20],
             pair_number=row['pair_number'],
             time_range=row['time_range'][:30],
-            content=row['content'][:600],
+            subject=(parts[0] if len(parts) > 0 else '')[:200],
+            teacher_name=(parts[1] if len(parts) > 1 else '')[:150],
+            room=(parts[2] if len(parts) > 2 else '')[:60],
+            content=content_text,
             content_half_1=row['content_half_1'][:400],
             content_half_2=row['content_half_2'][:400],
         ))
@@ -1325,21 +1343,174 @@ def admin_edit_schedule_lesson(lesson_id):
     if current_user.role != 'admin':
         return redirect(url_for('dashboard'))
 
-    lesson = ScheduleLesson.query.get(lesson_id)
+    lesson = db.session.get(ScheduleLesson, lesson_id)
     if not lesson:
         flash('Занятие не найдено')
         return redirect(url_for('schedule_page'))
 
+    lesson.sheet_name = normalize_cell_value(request.form.get('sheet_name', lesson.sheet_name))[:50] or lesson.sheet_name
+    lesson.group_name = normalize_cell_value(request.form.get('group_name', lesson.group_name)).upper()[:60] or lesson.group_name
+    lesson.day_name = normalize_cell_value(request.form.get('day_name', lesson.day_name))[:20] or lesson.day_name
+    try:
+        pair_number = int(request.form.get('pair_number', lesson.pair_number))
+    except ValueError:
+        pair_number = lesson.pair_number
+    lesson.pair_number = min(7, max(1, pair_number))
+    lesson.time_range = normalize_cell_value(request.form.get('time_range', lesson.time_range))[:30] or lesson.time_range
+
+    lesson.subject = normalize_cell_value(request.form.get('subject', lesson.subject))[:200]
+    lesson.teacher_name = normalize_cell_value(request.form.get('teacher_name', lesson.teacher_name))[:150]
+    lesson.room = normalize_cell_value(request.form.get('room', lesson.room))[:60]
+
     content = normalize_cell_value(request.form.get('content', ''))
     if not content:
-        flash('Текст занятия не может быть пустым')
-        return redirect(url_for('schedule_page', group_name=lesson.group_name, sheet=lesson.sheet_name, group='all'))
+        content = ' | '.join([part for part in [lesson.subject, lesson.teacher_name, lesson.room] if part]).strip()
+    lesson.content = (content or lesson.content)[:600]
 
-    lesson.content = content[:600]
     db.session.commit()
     log_audit('edit_schedule_lesson', f'lesson_id={lesson.id}, group={lesson.group_name}')
     flash('Занятие обновлено вручную')
     return redirect(url_for('schedule_page', group_name=lesson.group_name, sheet=lesson.sheet_name, group='all'))
+
+
+@app.route('/admin/schedule/lesson/create', methods=['POST'])
+@login_required
+def admin_create_schedule_lesson():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    active_week = get_active_schedule_week()
+    if not active_week:
+        flash('Сначала загрузите Excel, чтобы создать активную неделю')
+        return redirect(url_for('admin_dashboard'))
+
+    group_name = normalize_cell_value(request.form.get('group_name', '')).upper()
+    sheet_name = normalize_cell_value(request.form.get('sheet_name', 'ОБЩЕЕ'))
+    day_name = normalize_cell_value(request.form.get('day_name', 'Понедельник'))
+    try:
+        pair_number = int(request.form.get('pair_number', '1'))
+    except ValueError:
+        pair_number = 1
+
+    if not group_name:
+        flash('Укажите название группы')
+        return redirect(url_for('schedule_page'))
+
+    time_range = normalize_cell_value(request.form.get('time_range', PAIR_TIME_RANGES.get(pair_number, 'Время уточняется')))[:30]
+    subject = normalize_cell_value(request.form.get('subject', ''))[:200]
+    teacher_name = normalize_cell_value(request.form.get('teacher_name', ''))[:150]
+    room = normalize_cell_value(request.form.get('room', ''))[:60]
+    content = normalize_cell_value(request.form.get('content', ''))[:600]
+    if not content:
+        content = ' | '.join([part for part in [subject, teacher_name, room] if part])[:600]
+
+    lesson = ScheduleLesson(
+        week_id=active_week.id,
+        sheet_name=sheet_name[:50] or 'ОБЩЕЕ',
+        group_name=group_name[:60],
+        day_name=day_name[:20] or 'Понедельник',
+        pair_number=min(7, max(1, pair_number)),
+        time_range=time_range or PAIR_TIME_RANGES.get(min(7, max(1, pair_number)), 'Время уточняется'),
+        subject=subject,
+        teacher_name=teacher_name,
+        room=room,
+        content=content or '—',
+        content_half_1='',
+        content_half_2=''
+    )
+    db.session.add(lesson)
+    db.session.commit()
+    log_audit('create_schedule_lesson', f'lesson_id={lesson.id}, group={lesson.group_name}')
+    flash('Занятие добавлено')
+    return redirect(url_for('schedule_page', group_name=lesson.group_name, sheet=lesson.sheet_name, group='all'))
+
+
+@app.route('/admin/schedule/lesson/<int:lesson_id>/delete', methods=['POST'])
+@login_required
+def admin_delete_schedule_lesson(lesson_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    lesson = db.session.get(ScheduleLesson, lesson_id)
+    if not lesson:
+        flash('Занятие не найдено')
+        return redirect(url_for('schedule_page'))
+
+    group_name = lesson.group_name
+    sheet_name = lesson.sheet_name
+    db.session.delete(lesson)
+    db.session.commit()
+    log_audit('delete_schedule_lesson', f'lesson_id={lesson_id}')
+    flash('Занятие удалено')
+    return redirect(url_for('schedule_page', group_name=group_name, sheet=sheet_name, group='all'))
+
+
+@app.route('/admin/schedule/group/add', methods=['POST'])
+@login_required
+def admin_add_schedule_group():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    active_week = get_active_schedule_week()
+    if not active_week:
+        flash('Сначала загрузите Excel, чтобы создать активную неделю')
+        return redirect(url_for('admin_dashboard'))
+
+    group_name = normalize_cell_value(request.form.get('group_name', '')).upper()
+    sheet_name = normalize_cell_value(request.form.get('sheet_name', 'ОБЩЕЕ'))
+    if not group_name:
+        flash('Введите название группы')
+        return redirect(url_for('schedule_page'))
+
+    exists = ScheduleLesson.query.filter_by(week_id=active_week.id, group_name=group_name).first()
+    if exists:
+        flash('Такая группа уже есть в расписании')
+        return redirect(url_for('schedule_page', group_name=group_name, sheet=sheet_name, group='all'))
+
+    for day_name in DAY_NAMES:
+        for pair_number in range(1, 8):
+            db.session.add(ScheduleLesson(
+                week_id=active_week.id,
+                sheet_name=sheet_name[:50] or 'ОБЩЕЕ',
+                group_name=group_name[:60],
+                day_name=day_name,
+                pair_number=pair_number,
+                time_range=PAIR_TIME_RANGES.get(pair_number, 'Время уточняется'),
+                subject='',
+                teacher_name='',
+                room='',
+                content='—',
+                content_half_1='',
+                content_half_2=''
+            ))
+
+    db.session.commit()
+    log_audit('add_schedule_group', f'group={group_name}, week_id={active_week.id}')
+    flash('Группа добавлена в расписание')
+    return redirect(url_for('schedule_page', group_name=group_name, sheet=sheet_name, group='all'))
+
+
+@app.route('/admin/schedule/group/delete', methods=['POST'])
+@login_required
+def admin_delete_schedule_group():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    active_week = get_active_schedule_week()
+    if not active_week:
+        flash('Активная неделя не найдена')
+        return redirect(url_for('schedule_page'))
+
+    group_name = normalize_cell_value(request.form.get('group_name', '')).upper()
+    if not group_name:
+        flash('Укажите группу для удаления')
+        return redirect(url_for('schedule_page'))
+
+    deleted = ScheduleLesson.query.filter_by(week_id=active_week.id, group_name=group_name).delete()
+    db.session.commit()
+    log_audit('delete_schedule_group', f'group={group_name}, deleted={deleted}')
+    flash(f'Группа {group_name} удалена из расписания ({deleted} записей)')
+    return redirect(url_for('schedule_page', group='all'))
 
 
 @app.route('/health')
