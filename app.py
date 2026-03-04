@@ -117,6 +117,7 @@ class Grade(db.Model):
     student_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'))
     grade = db.Column(db.Integer)
+    mark = db.Column(db.String(5), default='')
     comment = db.Column(db.String(300), default='')
     semester = db.Column(db.Integer, nullable=False, default=1)
     graded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -262,6 +263,9 @@ def ensure_runtime_columns():
     if 'semester' not in grade_columns:
         db.session.execute(text('ALTER TABLE grade ADD COLUMN semester INTEGER DEFAULT 1'))
         db.session.execute(text('UPDATE grade SET semester = 1 WHERE semester IS NULL OR semester < 1 OR semester > 2'))
+    if 'mark' not in grade_columns:
+        db.session.execute(text('ALTER TABLE grade ADD COLUMN mark VARCHAR(5) DEFAULT ""'))
+        db.session.execute(text('UPDATE grade SET mark = "" WHERE mark IS NULL'))
 
     audit_columns = {column['name'] for column in inspector.get_columns('audit_log')}
     if 'created_at' not in audit_columns:
@@ -473,14 +477,29 @@ def resolve_semester_filter(raw_value):
 
 
 def get_semester_averages(grades):
-    first = [g.grade for g in grades if g.semester == 1]
-    second = [g.grade for g in grades if g.semester == 2]
-    overall = [g.grade for g in grades]
+    numeric = [g.grade for g in grades if isinstance(g.grade, (int, float))]
+    first = [g.grade for g in grades if g.semester == 1 and isinstance(g.grade, (int, float))]
+    second = [g.grade for g in grades if g.semester == 2 and isinstance(g.grade, (int, float))]
     return {
         'semester_1_avg': round(sum(first) / len(first), 2) if first else 0,
         'semester_2_avg': round(sum(second) / len(second), 2) if second else 0,
-        'course_avg': round(sum(overall) / len(overall), 2) if overall else 0
+        'course_avg': round(sum(numeric) / len(numeric), 2) if numeric else 0
     }
+
+
+def normalize_grade_input(raw_value):
+    value = normalize_cell_value(raw_value).upper()
+    if not value:
+        return None, None
+    if value in {'Н', 'Н/А', 'Н.А'}:
+        return None, 'Н'
+    try:
+        numeric = int(value)
+    except ValueError:
+        return 'invalid', None
+    if numeric < 1 or numeric > 5:
+        return 'invalid', None
+    return numeric, ''
 
 
 def create_notification(user_id, title, message):
@@ -1600,7 +1619,7 @@ def student_dashboard():
         grades_query = grades_query.filter(Grade.semester == semester_value)
     grades = grades_query.order_by(Grade.graded_at.desc(), Grade.id.desc()).all()
 
-    grade_values = [grade.grade for grade in grades]
+    grade_values = [grade.grade for grade in grades if isinstance(grade.grade, (int, float))]
     average_grade = round(sum(grade_values) / len(grade_values), 2) if grade_values else 0
     all_student_grades = Grade.query.filter_by(student_id=current_user.id).all()
     semester_stats = get_semester_averages(all_student_grades)
@@ -1671,9 +1690,9 @@ def export_student_grades():
 
     stream = io.StringIO()
     writer = csv.writer(stream, delimiter=';')
-    writer.writerow(['subject', 'grade', 'semester', 'graded_at'])
+    writer.writerow(['subject', 'grade_or_mark', 'semester', 'graded_at'])
     for item in grades:
-        writer.writerow([item.subject.name, item.grade, item.semester, item.graded_at.isoformat() if item.graded_at else ''])
+        writer.writerow([item.subject.name, (item.mark or item.grade), item.semester, item.graded_at.isoformat() if item.graded_at else ''])
 
     return Response(
         '\ufeff' + stream.getvalue(),
@@ -1697,108 +1716,79 @@ def teacher_dashboard():
     search_query = request.args.get('q', '').strip()
     page = request.args.get('page', 1, type=int)
 
+    # Journal controls
+    selected_group = request.args.get('journal_group', '').strip().upper()
+    selected_subject_id = request.args.get('journal_subject_id', type=int)
+    journal_month_raw = request.args.get('journal_month', datetime.utcnow().strftime('%Y-%m'))
+    try:
+        journal_year, journal_month = [int(x) for x in journal_month_raw.split('-', 1)]
+        month_start = datetime(journal_year, journal_month, 1)
+    except Exception:
+        month_start = datetime(datetime.utcnow().year, datetime.utcnow().month, 1)
+        journal_year, journal_month = month_start.year, month_start.month
+        journal_month_raw = f'{journal_year:04d}-{journal_month:02d}'
+
+    if journal_month == 12:
+        month_end = datetime(journal_year + 1, 1, 1)
+    else:
+        month_end = datetime(journal_year, journal_month + 1, 1)
+    days_in_month = (month_end - month_start).days
+
     if request.method == 'POST':
         action = request.form.get('action')
 
-        if action == 'create_grade':
+        if action in {'create_grade', 'update_grade'}:
             student_id = request.form.get('student_id')
             subject_id = request.form.get('subject_id')
             grade_value = request.form.get('value')
             semester = request.form.get('semester', '1')
             comment = request.form.get('comment', '').strip()
+            graded_at_raw = request.form.get('graded_at', '').strip()
 
-            if not student_id or not subject_id or not grade_value:
+            if not student_id or not subject_id or grade_value is None:
                 flash('Заполните все поля для выставления оценки')
                 return redirect(url_for('teacher_dashboard'))
 
             student = User.query.filter_by(id=student_id, role='student', is_verified=True).first()
             subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
-
             if not student or not subject:
                 flash('Выбраны некорректные студент или предмет')
                 return redirect(url_for('teacher_dashboard'))
 
-            try:
-                numeric_grade = int(grade_value)
-            except (TypeError, ValueError):
-                flash('Оценка должна быть числом')
-                return redirect(url_for('teacher_dashboard'))
-
-            if numeric_grade < 1 or numeric_grade > 5:
-                flash('Оценка должна быть от 1 до 5')
+            numeric_grade, mark = normalize_grade_input(grade_value)
+            if numeric_grade == 'invalid':
+                flash('Оценка должна быть 1-5 или Н')
                 return redirect(url_for('teacher_dashboard'))
 
             if semester not in {'1', '2'}:
                 flash('Семестр должен быть 1 или 2')
                 return redirect(url_for('teacher_dashboard'))
 
-            new_grade = Grade(
-                student_id=student.id,
-                subject_id=subject.id,
-                grade=numeric_grade,
-                comment=comment[:300],
-                semester=int(semester),
-                graded_at=datetime.utcnow()
-            )
-            db.session.add(new_grade)
-            create_notification(student.id, 'Новая оценка', f'По предмету {subject.name} выставлена оценка {numeric_grade} (семестр {semester}).')
-            db.session.commit()
-            log_audit('create_grade', f'grade_id={new_grade.id}, student={student.id}, subject={subject.id}, grade={numeric_grade}, semester={semester}')
-            flash(f'Оценка добавлена: {student.name} / {subject.name} = {numeric_grade}')
-            return redirect(url_for('teacher_dashboard'))
-
-        if action == 'create_grade_bulk':
-            subject_id = request.form.get('subject_id')
-            semester = request.form.get('semester', '1')
-            if semester not in {'1', '2'}:
-                flash('Семестр должен быть 1 или 2')
-                return redirect(url_for('teacher_dashboard'))
-
-            subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
-            if not subject:
-                flash('Выберите корректный предмет для массового ввода')
-                return redirect(url_for('teacher_dashboard'))
-
-            created = 0
-            for student in students:
-                raw_grade = (request.form.get(f'grade_{student.id}') or '').strip()
-                raw_comment = (request.form.get(f'comment_{student.id}') or '').strip()
-                if not raw_grade:
-                    continue
-
+            graded_at = datetime.utcnow()
+            if graded_at_raw:
                 try:
-                    numeric_grade = int(raw_grade)
+                    graded_at = datetime.strptime(graded_at_raw, '%Y-%m-%d')
                 except ValueError:
-                    continue
+                    pass
 
-                if numeric_grade < 1 or numeric_grade > 5:
-                    continue
-
-                db.session.add(Grade(
+            if action == 'create_grade':
+                grade_item = Grade(
                     student_id=student.id,
                     subject_id=subject.id,
-                    grade=numeric_grade,
-                    comment=raw_comment[:300],
+                    grade=numeric_grade if isinstance(numeric_grade, int) else None,
+                    mark=mark or '',
+                    comment=comment[:300],
                     semester=int(semester),
-                    graded_at=datetime.utcnow()
-                ))
-                create_notification(
-                    student.id,
-                    'Новая оценка',
-                    f'По предмету {subject.name} добавлена оценка {numeric_grade} (семестр {semester}).'
+                    graded_at=graded_at
                 )
-                created += 1
-
-            if created == 0:
-                flash('Не удалось добавить оценки: заполните хотя бы одну валидную оценку (1-5)')
+                db.session.add(grade_item)
+                db.session.commit()
+                create_notification(student.id, 'Новая отметка', f'По предмету {subject.name} выставлена отметка {(mark or numeric_grade)}.')
+                db.session.commit()
+                log_audit('create_grade', f'grade_id={grade_item.id}, student={student.id}, subject={subject.id}')
+                flash('Отметка добавлена')
                 return redirect(url_for('teacher_dashboard'))
 
-            db.session.commit()
-            log_audit('create_grade_bulk', f'subject={subject.id}, semester={semester}, created={created}')
-            flash(f'Массовый ввод выполнен: добавлено оценок {created}')
-            return redirect(url_for('teacher_dashboard'))
-
-        if action in {'update_grade', 'delete_grade'}:
             grade_id = request.form.get('grade_id')
             try:
                 grade_id = int(grade_id)
@@ -1806,91 +1796,162 @@ def teacher_dashboard():
                 flash('Некорректная оценка')
                 return redirect(url_for('teacher_dashboard'))
 
-            grade_item = (
-                Grade.query.join(Subject)
-                .filter(Grade.id == grade_id, Subject.teacher_id == current_user.id)
-                .first()
-            )
+            grade_item = Grade.query.join(Subject).filter(Grade.id == grade_id, Subject.teacher_id == current_user.id).first()
             if not grade_item:
                 flash('Оценка не найдена или недоступна')
                 return redirect(url_for('teacher_dashboard'))
 
-            if action == 'delete_grade':
-                db.session.delete(grade_item)
-                db.session.commit()
-                log_audit('delete_grade', f'grade_id={grade_id}')
-                flash('Оценка удалена')
-                return redirect(url_for('teacher_dashboard'))
-
-            grade_value = request.form.get('value')
-            semester = request.form.get('semester', '1')
-            comment = request.form.get('comment', '').strip()
-            if not grade_value:
-                flash('Укажите оценку от 1 до 5')
-                return redirect(url_for('teacher_dashboard'))
-
-            try:
-                numeric_grade = int(grade_value)
-            except (TypeError, ValueError):
-                flash('Оценка должна быть числом')
-                return redirect(url_for('teacher_dashboard'))
-
-            if numeric_grade < 1 or numeric_grade > 5:
-                flash('Оценка должна быть от 1 до 5')
-                return redirect(url_for('teacher_dashboard'))
-
-            if semester not in {'1', '2'}:
-                flash('Семестр должен быть 1 или 2')
-                return redirect(url_for('teacher_dashboard'))
-
-            grade_item.grade = numeric_grade
-            grade_item.semester = int(semester)
+            grade_item.grade = numeric_grade if isinstance(numeric_grade, int) else None
+            grade_item.mark = mark or ''
             grade_item.comment = comment[:300]
-            grade_item.graded_at = datetime.utcnow()
+            grade_item.semester = int(semester)
+            grade_item.graded_at = graded_at
             db.session.commit()
-            create_notification(grade_item.student_id, 'Оценка обновлена', f'Оценка по предмету {grade_item.subject.name} обновлена на {numeric_grade} (семестр {semester}).')
-            log_audit('update_grade', f'grade_id={grade_id}, grade={numeric_grade}, semester={semester}')
-            flash('Оценка обновлена')
+            log_audit('update_grade', f'grade_id={grade_id}, value={mark or numeric_grade}')
+            flash('Отметка обновлена')
             return redirect(url_for('teacher_dashboard'))
+
+        if action == 'delete_grade':
+            grade_id = request.form.get('grade_id')
+            try:
+                grade_id = int(grade_id)
+            except (TypeError, ValueError):
+                flash('Некорректная оценка')
+                return redirect(url_for('teacher_dashboard'))
+            grade_item = Grade.query.join(Subject).filter(Grade.id == grade_id, Subject.teacher_id == current_user.id).first()
+            if not grade_item:
+                flash('Оценка не найдена или недоступна')
+                return redirect(url_for('teacher_dashboard'))
+            db.session.delete(grade_item)
+            db.session.commit()
+            log_audit('delete_grade', f'grade_id={grade_id}')
+            flash('Отметка удалена')
+            return redirect(url_for('teacher_dashboard'))
+
+        if action == 'save_journal_month':
+            group_name = normalize_cell_value(request.form.get('journal_group', '')).upper()
+            subject_id = request.form.get('journal_subject_id', type=int)
+            journal_month_post = request.form.get('journal_month', journal_month_raw)
+            try:
+                y, m = [int(x) for x in journal_month_post.split('-', 1)]
+                ms = datetime(y, m, 1)
+            except Exception:
+                ms = month_start
+            me = datetime(ms.year + (1 if ms.month == 12 else 0), 1 if ms.month == 12 else ms.month + 1, 1)
+            dim = (me - ms).days
+
+            subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
+            if not group_name or not subject:
+                flash('Для журнала выберите группу и предмет')
+                return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=journal_month_post, group='all'))
+
+            journal_students = [s for s in students if s.group_id and groups_by_id.get(s.group_id, '').upper() == group_name]
+            updated = 0
+            for student in journal_students:
+                for day in range(1, dim + 1):
+                    key = f'cell_{student.id}_{day}'
+                    raw_value = request.form.get(key, '').strip()
+                    comment_key = f'comment_{student.id}_{day}'
+                    raw_comment = request.form.get(comment_key, '').strip()
+                    target_dt = datetime(ms.year, ms.month, day, 12, 0, 0)
+
+                    existing = Grade.query.filter(
+                        Grade.student_id == student.id,
+                        Grade.subject_id == subject.id,
+                        func.date(Grade.graded_at) == target_dt.date().isoformat()
+                    ).first()
+
+                    if not raw_value:
+                        if existing and (existing.comment != raw_comment):
+                            existing.comment = raw_comment[:300]
+                            updated += 1
+                        continue
+
+                    numeric_grade, mark = normalize_grade_input(raw_value)
+                    if numeric_grade == 'invalid':
+                        continue
+
+                    if existing:
+                        existing.grade = numeric_grade if isinstance(numeric_grade, int) else None
+                        existing.mark = mark or ''
+                        existing.comment = raw_comment[:300]
+                        existing.graded_at = target_dt
+                        updated += 1
+                    else:
+                        db.session.add(Grade(
+                            student_id=student.id,
+                            subject_id=subject.id,
+                            grade=numeric_grade if isinstance(numeric_grade, int) else None,
+                            mark=mark or '',
+                            comment=raw_comment[:300],
+                            semester=1 if ms.month <= 6 else 2,
+                            graded_at=target_dt
+                        ))
+                        updated += 1
+
+            db.session.commit()
+            log_audit('save_journal_month', f'group={group_name}, subject={subject_id}, month={journal_month_post}, updated={updated}')
+            flash(f'Журнал сохранён, обновлено ячеек: {updated}')
+            return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=journal_month_post, group='all'))
 
         flash('Некорректное действие')
         return redirect(url_for('teacher_dashboard'))
 
-    recent_grades_query = (
-        Grade.query.join(Subject).join(User, Grade.student_id == User.id)
-        .filter(Subject.teacher_id == current_user.id)
-    )
+    recent_grades_query = Grade.query.join(Subject).join(User, Grade.student_id == User.id).filter(Subject.teacher_id == current_user.id)
     recent_grades_query = apply_period_filter(recent_grades_query, period)
     if semester_value:
         recent_grades_query = recent_grades_query.filter(Grade.semester == semester_value)
     if search_query:
-        recent_grades_query = recent_grades_query.filter(
-            (User.name.ilike(f'%{search_query}%')) |
-            (Subject.name.ilike(f'%{search_query}%')) |
-            (Grade.comment.ilike(f'%{search_query}%'))
-        )
+        recent_grades_query = recent_grades_query.filter((User.name.ilike(f'%{search_query}%')) | (Subject.name.ilike(f'%{search_query}%')) | (Grade.comment.ilike(f'%{search_query}%')))
 
     total_recent_grades = recent_grades_query.count()
     per_page = 20
-    recent_grades = (
-        recent_grades_query
-        .order_by(Grade.graded_at.desc(), Grade.id.desc())
-        .offset((max(page, 1) - 1) * per_page)
-        .limit(per_page)
-        .all()
-    )
+    recent_grades = recent_grades_query.order_by(Grade.graded_at.desc(), Grade.id.desc()).offset((max(page, 1) - 1) * per_page).limit(per_page).all()
     total_pages = max(1, (total_recent_grades + per_page - 1) // per_page)
 
-    subject_averages = dict(
-        db.session.query(Subject.id, func.round(func.avg(Grade.grade), 2))
-        .outerjoin(Grade, Grade.subject_id == Subject.id)
-        .filter(Subject.teacher_id == current_user.id)
-        .group_by(Subject.id)
-        .all()
-    )
+    subject_averages = dict(db.session.query(Subject.id, func.round(func.avg(Grade.grade), 2)).outerjoin(Grade, Grade.subject_id == Subject.id).filter(Subject.teacher_id == current_user.id).group_by(Subject.id).all())
 
     all_teacher_grades = Grade.query.join(Subject).filter(Subject.teacher_id == current_user.id).all()
     teacher_stats = get_semester_averages(all_teacher_grades)
+
+    # Journal data
+    group_names = sorted({groups_by_id.get(student.group_id, '').upper() for student in students if student.group_id and groups_by_id.get(student.group_id)})
+    if not selected_group and group_names:
+        selected_group = group_names[0]
+
+    journal_students = [s for s in students if s.group_id and groups_by_id.get(s.group_id, '').upper() == selected_group] if selected_group else []
+    if not selected_subject_id and subjects:
+        selected_subject_id = subjects[0].id
+
+    journal_subject = next((subj for subj in subjects if subj.id == selected_subject_id), None)
+    journal_entries = {}
+    journal_comments = {}
+    journal_status = {}
+    if journal_subject and journal_students:
+        entries = Grade.query.filter(
+            Grade.subject_id == journal_subject.id,
+            Grade.student_id.in_([s.id for s in journal_students]),
+            Grade.graded_at >= month_start,
+            Grade.graded_at < month_end
+        ).order_by(Grade.graded_at.asc(), Grade.id.asc()).all()
+
+        for item in entries:
+            day = item.graded_at.day if item.graded_at else 1
+            key = (item.student_id, day)
+            display_value = item.mark if item.mark else (str(item.grade) if item.grade is not None else '')
+            journal_entries[key] = display_value
+            journal_comments[key] = item.comment or ''
+
+        for student in journal_students:
+            st_entries = [entry for entry in entries if entry.student_id == student.id]
+            n_count = len([e for e in st_entries if (e.mark or '').upper() == 'Н'])
+            numeric = [e.grade for e in st_entries if isinstance(e.grade, (int, float))]
+            avg = round(sum(numeric) / len(numeric), 2) if numeric else 0
+            journal_status[student.id] = {
+                'n_count': n_count,
+                'avg': avg,
+                'na': (n_count > len(numeric)) or (numeric and avg < 2.5)
+            }
 
     return render_template(
         'teacher_dashboard.html',
@@ -1905,7 +1966,17 @@ def teacher_dashboard():
         teacher_stats=teacher_stats,
         page=page,
         total_pages=total_pages,
-        total_recent_grades=total_recent_grades
+        total_recent_grades=total_recent_grades,
+        group_names=group_names,
+        selected_group=selected_group,
+        selected_subject_id=selected_subject_id,
+        journal_subject=journal_subject,
+        journal_month=journal_month_raw,
+        days_in_month=days_in_month,
+        journal_students=journal_students,
+        journal_entries=journal_entries,
+        journal_comments=journal_comments,
+        journal_status=journal_status,
     )
 
 
@@ -1924,9 +1995,9 @@ def export_teacher_grades():
 
     stream = io.StringIO()
     writer = csv.writer(stream, delimiter=';')
-    writer.writerow(['student', 'subject', 'grade', 'semester', 'comment', 'graded_at'])
+    writer.writerow(['student', 'subject', 'grade_or_mark', 'semester', 'comment', 'graded_at'])
     for item in grades:
-        writer.writerow([item.student.name, item.subject.name, item.grade, item.semester, item.comment or '', item.graded_at.isoformat() if item.graded_at else ''])
+        writer.writerow([item.student.name, item.subject.name, (item.mark or item.grade), item.semester, item.comment or '', item.graded_at.isoformat() if item.graded_at else ''])
 
     return Response(
         '\ufeff' + stream.getvalue(),
