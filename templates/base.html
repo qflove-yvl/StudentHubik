@@ -27,13 +27,14 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 <div class="topbar">
     <div class="top-left">
         <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo" alt="StudentHubik">
+        <div class="top-left-brand">
+            <div class="top-left-title">{{ college_name|default('StudentHubik') }}</div>
+            <div class="top-left-subtitle">Электронный журнал</div>
+        </div>
     </div>
 
     <div class="top-center">
-        <div class="top-center-stack">
-            <div class="top-badge">Официальный электронный журнал</div>
-            <div class="top-college-name">{{ college_name|default('StudentHubik') }}</div>
-        </div>
+        <div class="top-center-stack"><div class="top-badge">Официальный электронный журнал</div></div>
     </div>
 
     <div class="top-right">

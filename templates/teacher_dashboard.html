@@ -2,46 +2,29 @@
 {% block content %}
 {% set period_safe = period|default('all') %}
 {% set semester_filter_safe = semester_filter|default('all') %}
-{% set page_safe = page|default(1) %}
-{% set total_pages_safe = total_pages|default(1) %}
 {% set search_query_safe = search_query|default('') %}
 {% set teacher_stats_safe = teacher_stats|default({'semester_1_avg':0,'semester_2_avg':0,'course_avg':0}) %}
+{% set journal_summary_safe = journal_summary|default({'students':0,'avg':0,'absences':0,'filled_cells':0,'fill_rate':0}) %}
 
-<h1 class="page-title">Электронный журнал преподавателя</h1>
-
-<div class="dashboard-actions">
-  <a href="{{ url_for('export_teacher_grades') }}" class="btn">Скачать журнал (CSV)</a>
+<div class="teacher-header-row">
+  <h1 class="page-title" style="margin-bottom:0;">Кабинет преподавателя</h1>
+  <div class="dashboard-actions" style="margin-bottom:0;">
+    <a href="{{ url_for('export_teacher_grades') }}" class="btn">Скачать журнал (CSV)</a>
+  </div>
 </div>
 
-<div class="card-grid">
+<div class="card-grid teacher-metrics-grid">
   <div class="card"><div class="card-title">Предметов</div><div class="card-value">{{ subjects|length }}</div></div>
   <div class="card"><div class="card-title">Студентов</div><div class="card-value">{{ students|length }}</div></div>
   <div class="card"><div class="card-title">Средний за 1 семестр</div><div class="card-value">{{ teacher_stats_safe.semester_1_avg }}</div></div>
   <div class="card"><div class="card-title">Средний за 2 семестр</div><div class="card-value">{{ teacher_stats_safe.semester_2_avg }}</div></div>
   <div class="card"><div class="card-title">Средний за курс</div><div class="card-value">{{ teacher_stats_safe.course_avg }}</div></div>
+  <div class="card"><div class="card-title">Средний по текущему журналу</div><div class="card-value">{{ journal_summary_safe.avg }}</div></div>
 </div>
 
 <section class="card" style="margin-top:16px;">
-  <h2 style="margin-bottom:12px;">Студенты по группам</h2>
-  {% if group_names %}
-    {% for gname in group_names %}
-      <details {% if gname == selected_group %}open{% endif %} style="margin-bottom:8px;">
-        <summary><strong>{{ gname }}</strong></summary>
-        <ul style="margin-top:8px;padding-left:20px;">
-          {% for st in students if st.group_id and groups_by_id.get(st.group_id, '').upper() == gname %}
-            <li>{{ st.name }} ({{ st.email }})</li>
-          {% endfor %}
-        </ul>
-      </details>
-    {% endfor %}
-  {% else %}
-    <p class="muted-text">Нет доступных студентов.</p>
-  {% endif %}
-</section>
-
-<section class="card" style="margin-top:16px;">
   <h2 style="margin-bottom:12px;">Журнал за месяц</h2>
-  <form method="GET" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:10px;">
+  <form method="GET" class="journal-filter-row">
     <div>
       <label class="field-label">Группа</label>
       <select name="journal_group" class="input-field" style="margin:0;min-width:170px;">
@@ -65,43 +48,58 @@
     <button class="btn" type="submit">Открыть журнал</button>
   </form>
 
+  <div class="journal-toolbar">
+    <div class="status-chip-grid">
+      <span class="status-chip">В журнале: {{ journal_summary_safe.students }} студентов</span>
+      <span class="status-chip">Заполнено: {{ journal_summary_safe.filled_cells }} ячеек ({{ journal_summary_safe.fill_rate }}%)</span>
+      <span class="status-chip">Пропуски Н: {{ journal_summary_safe.absences }}</span>
+    </div>
+    <div class="journal-toolbar-actions">
+      <input id="journalStudentFilter" type="text" class="input-field" placeholder="Быстрый поиск по ФИО" style="margin:0;max-width:260px;">
+      <label class="journal-toggle"><input id="riskOnlyToggle" type="checkbox"> Только Н/А</label>
+    </div>
+  </div>
+
   {% if journal_students and journal_subject %}
-  <form method="POST">
+  <form method="POST" id="journalForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="action" value="save_journal_month">
     <input type="hidden" name="journal_group" value="{{ selected_group }}">
     <input type="hidden" name="journal_subject_id" value="{{ journal_subject.id }}">
     <input type="hidden" name="journal_month" value="{{ journal_month }}">
 
-    <div class="table-wrap">
-      <table class="grade-table">
+    <div class="table-wrap journal-wrap">
+      <table class="grade-table journal-table">
         <thead>
           <tr>
-            <th>ФИО</th>
+            <th class="sticky-col sticky-head">ФИО</th>
             {% for d in range(1, days_in_month + 1) %}<th>{{ d }}</th>{% endfor %}
             <th>Н</th><th>Ср. балл</th><th>Статус</th>
           </tr>
         </thead>
         <tbody>
           {% for st in journal_students %}
-          <tr>
-            <td>{{ st.name }}</td>
+          <tr class="journal-row" data-student-name="{{ st.name|lower }}" data-risk="{{ 1 if journal_status.get(st.id, {}).get('na') else 0 }}">
+            <td class="sticky-col"><strong>{{ st.name }}</strong><div class="muted-text" style="font-size:12px;">{{ st.email }}</div></td>
             {% for d in range(1, days_in_month + 1) %}
               {% set key = (st.id, d) %}
               <td>
-                <input name="cell_{{ st.id }}_{{ d }}" class="input-field" style="margin:0;max-width:52px;padding:6px 8px;" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5">
-                <input name="comment_{{ st.id }}_{{ d }}" class="input-field" style="margin-top:4px;max-width:90px;padding:4px 6px;font-size:11px;" value="{{ journal_comments.get(key, '') }}" placeholder="комм.">
+                <input name="cell_{{ st.id }}_{{ d }}" class="input-field journal-cell" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5" maxlength="3">
+                <input name="comment_{{ st.id }}_{{ d }}" class="input-field journal-comment" value="{{ journal_comments.get(key, '') }}" placeholder="комментарий">
               </td>
             {% endfor %}
             <td>{{ journal_status.get(st.id, {}).get('n_count', 0) }}</td>
             <td>{{ journal_status.get(st.id, {}).get('avg', 0) }}</td>
-            <td>{% if journal_status.get(st.id, {}).get('na') %}<span class="badge" style="background:#b91c1c;color:#fff;">Н/А</span>{% else %}—{% endif %}</td>
+            <td>{% if journal_status.get(st.id, {}).get('na') %}<span class="badge badge-danger">Н/А</span>{% else %}<span class="muted-text">—</span>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-    <button class="btn" type="submit" style="margin-top:10px;">Сохранить журнал за месяц</button>
+    <div class="journal-bottom-actions">
+      <span class="muted-text">Подсказка: Enter / Tab переходят по ячейкам, Ctrl+S сохраняет журнал.</span>
+      <button class="btn" type="submit">Сохранить журнал за месяц</button>
+    </div>
   </form>
   {% else %}
     <p class="muted-text">Выберите группу и предмет, чтобы открыть журнал.</p>
@@ -144,5 +142,48 @@
     <p class="muted-text">Оценок пока нет.</p>
   {% endif %}
 </section>
+
+<script>
+(function () {
+  const table = document.querySelector('.journal-table');
+  if (!table) return;
+
+  const cells = Array.from(table.querySelectorAll('.journal-cell'));
+  cells.forEach((cell, index) => {
+    cell.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const next = cells[index + 1] || cells[0];
+        if (next) next.focus();
+      }
+    });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      const form = document.getElementById('journalForm');
+      if (form) form.submit();
+    }
+  });
+
+  const nameFilter = document.getElementById('journalStudentFilter');
+  const riskOnly = document.getElementById('riskOnlyToggle');
+  const rows = Array.from(document.querySelectorAll('.journal-row'));
+
+  const applyFilter = () => {
+    const term = (nameFilter?.value || '').toLowerCase().trim();
+    const risk = !!riskOnly?.checked;
+    rows.forEach((row) => {
+      const byName = !term || (row.dataset.studentName || '').includes(term);
+      const byRisk = !risk || row.dataset.risk === '1';
+      row.style.display = (byName && byRisk) ? '' : 'none';
+    });
+  };
+
+  if (nameFilter) nameFilter.addEventListener('input', applyFilter);
+  if (riskOnly) riskOnly.addEventListener('change', applyFilter);
+})();
+</script>
 
 {% endblock %}

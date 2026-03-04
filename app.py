@@ -1927,6 +1927,7 @@ def teacher_dashboard():
     journal_entries = {}
     journal_comments = {}
     journal_status = {}
+    journal_summary = {'students': len(journal_students), 'avg': 0, 'absences': 0, 'filled_cells': 0, 'fill_rate': 0}
     if journal_subject and journal_students:
         entries = Grade.query.filter(
             Grade.subject_id == journal_subject.id,
@@ -1942,16 +1943,30 @@ def teacher_dashboard():
             journal_entries[key] = display_value
             journal_comments[key] = item.comment or ''
 
+        total_numeric = []
+        total_absences = 0
         for student in journal_students:
             st_entries = [entry for entry in entries if entry.student_id == student.id]
             n_count = len([e for e in st_entries if (e.mark or '').upper() == 'Н'])
             numeric = [e.grade for e in st_entries if isinstance(e.grade, (int, float))]
             avg = round(sum(numeric) / len(numeric), 2) if numeric else 0
+            total_numeric.extend(numeric)
+            total_absences += n_count
             journal_status[student.id] = {
                 'n_count': n_count,
                 'avg': avg,
                 'na': (n_count > len(numeric)) or (numeric and avg < 2.5)
             }
+
+        filled_cells = len(entries)
+        total_cells = len(journal_students) * days_in_month if journal_students else 0
+        journal_summary = {
+            'students': len(journal_students),
+            'avg': round(sum(total_numeric) / len(total_numeric), 2) if total_numeric else 0,
+            'absences': total_absences,
+            'filled_cells': filled_cells,
+            'fill_rate': round((filled_cells / total_cells) * 100, 1) if total_cells else 0,
+        }
 
     return render_template(
         'teacher_dashboard.html',
@@ -1977,6 +1992,7 @@ def teacher_dashboard():
         journal_entries=journal_entries,
         journal_comments=journal_comments,
         journal_status=journal_status,
+        journal_summary=journal_summary,
     )
 
 
