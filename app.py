@@ -1638,6 +1638,14 @@ def student_dashboard():
             risk_level = 'Нужно подтянуть'
 
     progress_points = build_student_progress_points(grades)
+    progress_delta = 0
+    progress_trend = 'Стабильно'
+    if len(progress_points) >= 2:
+        progress_delta = round(progress_points[-1]['avg'] - progress_points[-2]['avg'], 2)
+        if progress_delta > 0:
+            progress_trend = 'Прогресс'
+        elif progress_delta < 0:
+            progress_trend = 'Регресс'
 
     subject_averages = (
         db.session.query(Subject.name, func.round(func.avg(Grade.grade), 2), func.count(Grade.id))
@@ -1674,6 +1682,8 @@ def student_dashboard():
         progress_points=progress_points,
         new_grades_count=new_grades_count,
         risk_level=risk_level,
+        progress_delta=progress_delta,
+        progress_trend=progress_trend,
         page=page,
         subject_pages=subject_pages,
         total_subject_rows=total_subject_rows
@@ -1914,6 +1924,39 @@ def teacher_dashboard():
     all_teacher_grades = Grade.query.join(Subject).filter(Subject.teacher_id == current_user.id).all()
     teacher_stats = get_semester_averages(all_teacher_grades)
 
+    student_rankings = []
+    for student in students:
+        student_grades = (
+            Grade.query.join(Subject)
+            .filter(Subject.teacher_id == current_user.id, Grade.student_id == student.id)
+            .order_by(Grade.graded_at.asc(), Grade.id.asc())
+            .all()
+        )
+        numeric = [g.grade for g in student_grades if isinstance(g.grade, (int, float))]
+        if not numeric:
+            continue
+        avg = round(sum(numeric) / len(numeric), 2)
+        trend = 'Стабильно'
+        delta = 0
+        if len(numeric) >= 2:
+            delta = round(numeric[-1] - numeric[-2], 2)
+            if delta > 0:
+                trend = 'Прогресс'
+            elif delta < 0:
+                trend = 'Регресс'
+        student_rankings.append({
+            'id': student.id,
+            'name': student.name,
+            'group_name': groups_by_id.get(student.group_id, '—'),
+            'avg': avg,
+            'delta': delta,
+            'trend': trend,
+            'count': len(numeric),
+            'progress_percent': max(0, min(100, round((avg / 5) * 100, 1)))
+        })
+
+    student_rankings = sorted(student_rankings, key=lambda row: (-row['avg'], row['name'].lower()))
+
     # Journal data
     group_names = sorted({groups_by_id.get(student.group_id, '').upper() for student in students if student.group_id and groups_by_id.get(student.group_id)})
     if not selected_group and group_names:
@@ -1979,6 +2022,7 @@ def teacher_dashboard():
         semester_filter=semester_filter,
         search_query=search_query,
         teacher_stats=teacher_stats,
+        student_rankings=student_rankings,
         page=page,
         total_pages=total_pages,
         total_recent_grades=total_recent_grades,
@@ -2067,6 +2111,9 @@ def admin_dashboard():
     recent_audit = AuditLog.query.order_by(AuditLog.id.desc()).limit(40).all()
     latest_schedule = get_latest_schedule_file()
     active_week = get_active_schedule_week()
+    total_users_count = User.query.filter(User.role.in_(['student', 'teacher'])).count()
+    verified_users_count = User.query.filter(User.role.in_(['student', 'teacher']), User.is_verified.is_(True)).count()
+    approval_rate = round((verified_users_count / total_users_count) * 100, 1) if total_users_count else 0
     active_schedule_groups = []
     active_schedule_sheets = []
     if active_week:
@@ -2094,7 +2141,10 @@ def admin_dashboard():
         can_manage=current_user.role == 'admin',
         page=page,
         total_pages=total_pages,
-        total_filtered=total_filtered
+        total_filtered=total_filtered,
+        total_users_count=total_users_count,
+        verified_users_count=verified_users_count,
+        approval_rate=approval_rate
     )
 
 

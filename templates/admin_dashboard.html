@@ -90,7 +90,16 @@
     <div class="card"><div class="card-title">Новые преподаватели</div><div class="card-value">{{ pending_teachers|length }}</div></div>
     <div class="card"><div class="card-title">Одобренных студентов</div><div class="card-value">{{ approved_students|length }}</div></div>
     <div class="card"><div class="card-title">Одобренных преподавателей</div><div class="card-value">{{ approved_teachers|length }}</div></div>
+    <div class="card"><div class="card-title">Всего пользователей</div><div class="card-value">{{ total_users_count|default(0) }}</div></div>
+    <div class="card"><div class="card-title">Процент одобрения</div><div class="card-value">{{ approval_rate|default(0) }}%</div></div>
 </div>
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:10px;">Шкала модерации</h2>
+    <div class="student-rating-scale" aria-label="Шкала процента одобренных пользователей">
+        <div class="student-rating-fill" style="width: {{ approval_rate|default(0) }}%;"></div>
+    </div>
+    <p class="muted-text" style="margin-top:8px;">Одобрено: {{ verified_users_count|default(0) }} из {{ total_users_count|default(0) }}.</p>
+</section>
 
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Управление группами</h2>

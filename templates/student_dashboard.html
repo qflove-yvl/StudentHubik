@@ -25,6 +25,7 @@
     <div class="card"><div class="card-title">Средний за курс</div><div class="card-value">{{ semester_stats_safe.course_avg }}</div></div>
     <div class="card"><div class="card-title">Новых оценок за 7 дней</div><div class="card-value">{{ new_grades_count|default(0) }}</div></div>
     <div class="card"><div class="card-title">Статус успеваемости</div><div class="card-value">{{ risk_level|default('Низкий риск') }}</div></div>
+    <div class="card"><div class="card-title">Тренд</div><div class="card-value">{{ progress_trend|default('Стабильно') }}</div></div>
 </div>
 
 <section class="card list-card student-grades">
@@ -41,6 +42,14 @@
     {% else %}
         <p class="muted-text">Пока недостаточно данных для динамики.</p>
     {% endif %}
+</section>
+
+<section class="card list-card student-grades">
+    <h2>Шкала текущей успеваемости</h2>
+    <p class="muted-text">Текущий средний балл: <strong>{{ average_grade }}</strong> из 5 · Изменение к последней оценке: <strong>{{ progress_delta|default(0) }}</strong></p>
+    <div class="student-rating-scale" aria-label="Шкала среднего балла">
+        <div class="student-rating-fill" style="width: {{ ((average_grade|float / 5) * 100) if average_grade else 0 }}%;"></div>
+    </div>
 </section>
 
 <section class="card list-card student-grades">

@@ -80,7 +80,7 @@
         <tbody>
           {% for st in journal_students %}
           <tr class="journal-row" data-student-name="{{ st.name|lower }}" data-risk="{{ 1 if journal_status.get(st.id, {}).get('na') else 0 }}">
-            <td class="sticky-col"><strong>{{ st.name }}</strong><div class="muted-text" style="font-size:12px;">{{ st.email }}</div></td>
+            <td class="sticky-col"><strong>{{ st.name }}</strong></td>
             {% for d in range(1, days_in_month + 1) %}
               {% set key = (st.id, d) %}
               <td>
@@ -105,6 +105,37 @@
     <p class="muted-text">Выберите группу и предмет, чтобы открыть журнал.</p>
   {% endif %}
 </section>
+
+<section class="card" style="margin-top:16px;">
+  <h2 style="margin-bottom:10px;">Студенты по среднему баллу (ваши предметы)</h2>
+  {% if student_rankings|default([]) %}
+  <div class="table-wrap">
+    <table class="grade-table">
+      <thead><tr><th>#</th><th>Студент</th><th>Группа</th><th>Средний</th><th>Шкала</th><th>Тренд</th><th>Оценок</th></tr></thead>
+      <tbody>
+        {% for st in student_rankings %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ st.name }}</td>
+            <td>{{ st.group_name }}</td>
+            <td><strong>{{ st.avg }}</strong></td>
+            <td>
+              <div class="student-rating-scale" title="{{ st.progress_percent }}%">
+                <div class="student-rating-fill" style="width: {{ st.progress_percent }}%;"></div>
+              </div>
+            </td>
+            <td>{% if st.trend == 'Прогресс' %}<span class="badge">⬆ {{ st.trend }}</span>{% elif st.trend == 'Регресс' %}<span class="badge badge-danger">⬇ {{ st.trend }}</span>{% else %}<span class="muted-text">{{ st.trend }}</span>{% endif %}</td>
+            <td>{{ st.count }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted-text">Нет числовых оценок для построения рейтинга.</p>
+  {% endif %}
+</section>
+
 
 <section class="card" style="margin-top:16px;">
   <h2 style="margin-bottom:10px;">Последние оценки (редактирование)</h2>

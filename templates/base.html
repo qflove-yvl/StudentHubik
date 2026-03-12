@@ -27,14 +27,12 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 <div class="topbar">
     <div class="top-left">
         <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo" alt="StudentHubik">
-        <div class="top-left-brand">
-            <div class="top-left-title">{{ college_name|default('StudentHubik') }}</div>
-            <div class="top-left-subtitle">Электронный журнал</div>
-        </div>
     </div>
 
     <div class="top-center">
-        <div class="top-center-stack"><div class="top-badge">Официальный электронный журнал</div></div>
+        {% if current_user.is_authenticated %}
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Свернуть или раскрыть меню">☰ Меню</button>
+        {% endif %}
     </div>
 
     <div class="top-right">
@@ -59,7 +57,7 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 <div class="app-container">
 
     {% if current_user.is_authenticated %}
-    <aside class="sidebar">
+    <aside id="main-sidebar" class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="nav-link{% if request.endpoint == 'dashboard' %} active{% endif %}">Панель</a>
         <a href="{{ url_for('profile') }}" class="nav-link{% if request.endpoint == 'profile' %} active{% endif %}">Профиль</a>
         <a href="/schedule" class="nav-link{% if request.path.startswith('/schedule') %} active{% endif %}">Расписание</a>
@@ -154,6 +152,21 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 })();
+
+(function () {
+  const toggleBtn = document.getElementById('sidebar-toggle');
+  const sidebar = document.getElementById('main-sidebar');
+  if (!toggleBtn || !sidebar) return;
+  try {
+    const saved = localStorage.getItem('studenthubik_sidebar_collapsed');
+    if (saved === '1') document.body.classList.add('sidebar-collapsed');
+  } catch (e) {}
+  toggleBtn.addEventListener('click', () => {
+    const collapsed = document.body.classList.toggle('sidebar-collapsed');
+    try { localStorage.setItem('studenthubik_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+  });
+})();
+
 </script>
 
 </body>
