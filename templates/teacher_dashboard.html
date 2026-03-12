@@ -57,6 +57,7 @@
     <div class="journal-toolbar-actions">
       <input id="journalStudentFilter" type="text" class="input-field" placeholder="Быстрый поиск по ФИО" style="margin:0;max-width:260px;">
       <label class="journal-toggle"><input id="riskOnlyToggle" type="checkbox"> Только Н/А</label>
+      <button type="button" class="btn" id="fillAbsenceDayBtn" style="padding:10px 12px;">Заполнить Н за день</button>
     </div>
   </div>
 
@@ -200,6 +201,7 @@
 
   const nameFilter = document.getElementById('journalStudentFilter');
   const riskOnly = document.getElementById('riskOnlyToggle');
+  const fillAbsenceDayBtn = document.getElementById('fillAbsenceDayBtn');
   const rows = Array.from(document.querySelectorAll('.journal-row'));
 
   const applyFilter = () => {
@@ -214,6 +216,60 @@
 
   if (nameFilter) nameFilter.addEventListener('input', applyFilter);
   if (riskOnly) riskOnly.addEventListener('change', applyFilter);
+
+  const draftKey = `journal_draft_${location.pathname}_${location.search}`;
+  const loadDraft = () => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      cells.forEach((cell) => {
+        if (draft[cell.name] !== undefined && !cell.value) cell.value = draft[cell.name];
+      });
+      const comments = Array.from(table.querySelectorAll('.journal-comment'));
+      comments.forEach((comment) => {
+        if (draft[comment.name] !== undefined && !comment.value) comment.value = draft[comment.name];
+      });
+    } catch (e) {}
+  };
+
+  const saveDraft = () => {
+    try {
+      const draft = {};
+      Array.from(table.querySelectorAll('.journal-cell, .journal-comment')).forEach((input) => {
+        if (input.value) draft[input.name] = input.value;
+      });
+      localStorage.setItem(draftKey, JSON.stringify(draft));
+    } catch (e) {}
+  };
+
+  loadDraft();
+  Array.from(table.querySelectorAll('.journal-cell, .journal-comment')).forEach((input) => {
+    input.addEventListener('input', saveDraft);
+  });
+
+  const form = document.getElementById('journalForm');
+  if (form) {
+    form.addEventListener('submit', () => {
+      try { localStorage.removeItem(draftKey); } catch (e) {}
+    });
+  }
+
+  if (fillAbsenceDayBtn) {
+    fillAbsenceDayBtn.addEventListener('click', () => {
+      const dayRaw = prompt('Введите номер дня месяца, куда поставить Н в пустые ячейки (1-31):');
+      const day = parseInt(dayRaw || '', 10);
+      if (!Number.isFinite(day) || day < 1 || day > 31) return;
+      rows.forEach((row) => {
+        if (row.style.display === 'none') return;
+        const targetInput = row.querySelector(`input[name^="cell_"][name$="_${day}"]`);
+        if (targetInput && !targetInput.value.trim()) {
+          targetInput.value = 'Н';
+        }
+      });
+      saveDraft();
+    });
+  }
 })();
 </script>
 

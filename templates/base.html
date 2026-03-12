@@ -157,13 +157,19 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
   const toggleBtn = document.getElementById('sidebar-toggle');
   const sidebar = document.getElementById('main-sidebar');
   if (!toggleBtn || !sidebar) return;
+  const syncToggleText = () => {
+    const collapsed = document.body.classList.contains('sidebar-collapsed');
+    toggleBtn.textContent = collapsed ? '☰ Показать меню' : '☰ Скрыть меню';
+  };
   try {
     const saved = localStorage.getItem('studenthubik_sidebar_collapsed');
     if (saved === '1') document.body.classList.add('sidebar-collapsed');
   } catch (e) {}
+  syncToggleText();
   toggleBtn.addEventListener('click', () => {
     const collapsed = document.body.classList.toggle('sidebar-collapsed');
     try { localStorage.setItem('studenthubik_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    syncToggleText();
   });
 })();
 
