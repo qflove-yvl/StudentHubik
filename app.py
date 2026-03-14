@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 import os
 
 app = Flask(__name__)
@@ -22,6 +23,11 @@ class User(UserMixin, db.Model):
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey('group.id'))
+    is_verified = db.Column(db.Boolean, nullable=False, default=False)
+    telegram = db.Column(db.String(64), nullable=True)
+    theme = db.Column(db.String(20), nullable=False, default='dark')
+    compact_mode = db.Column(db.Boolean, nullable=False, default=False)
+    animations_enabled = db.Column(db.Boolean, nullable=False, default=True)
 
 
 class VerificationCode(db.Model):
@@ -54,6 +60,45 @@ class Grade(db.Model):
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
+
+
+def _migrate_user_table_if_needed():
+    """Backward-compatible schema patch for existing SQLite DBs."""
+    if not app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+        return
+
+    columns = {
+        row[1] for row in db.session.execute(text("PRAGMA table_info('user')")).fetchall()
+    }
+    migration_sql = [
+        ("is_verified", "ALTER TABLE user ADD COLUMN is_verified BOOLEAN NOT NULL DEFAULT 0"),
+        ("telegram", "ALTER TABLE user ADD COLUMN telegram VARCHAR(64)"),
+        ("theme", "ALTER TABLE user ADD COLUMN theme VARCHAR(20) NOT NULL DEFAULT 'dark'"),
+        ("compact_mode", "ALTER TABLE user ADD COLUMN compact_mode BOOLEAN NOT NULL DEFAULT 0"),
+        ("animations_enabled", "ALTER TABLE user ADD COLUMN animations_enabled BOOLEAN NOT NULL DEFAULT 1"),
+    ]
+
+    for name, sql in migration_sql:
+        if name not in columns:
+            db.session.execute(text(sql))
+    db.session.commit()
+
+
+def initialize_database():
+    db.create_all()
+    _migrate_user_table_if_needed()
+
+
+_initialized = False
+
+
+@app.before_request
+def ensure_database_initialized():
+    global _initialized
+    if _initialized:
+        return
+    initialize_database()
+    _initialized = True
 
 
 @app.route('/')
@@ -233,4 +278,6 @@ def teacher_dashboard():
 
 
 if __name__ == '__main__':
+    with app.app_context():
+        initialize_database()
     app.run(debug=True)
