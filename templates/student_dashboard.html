@@ -4,14 +4,18 @@
 <div class="dashboard">
     <h2>Ваши оценки</h2>
 
-    {% for grade in grades %}
-        <div class="panel">
-            <strong>{{ grade.subject.name }}</strong>
-            <div style="margin-top:10px;color:var(--muted);">
-                Оценка: {{ grade.grade }}
+    {% if grades %}
+        {% for grade in grades %}
+            <div class="panel grade-panel">
+                <strong>{{ grade.subject }}</strong>
+                <div class="grade-meta">
+                    Оценка: <span class="grade-badge">{{ grade.value }}</span>
+                </div>
             </div>
-        </div>
-    {% endfor %}
+        {% endfor %}
+    {% else %}
+        <div class="panel empty-state">Пока нет оценок. Они появятся после выставления преподавателем.</div>
+    {% endif %}
 
 </div>
 

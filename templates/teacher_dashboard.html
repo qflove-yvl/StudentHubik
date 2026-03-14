@@ -6,22 +6,31 @@
 
     <div class="panel">
         <h3>Добавить оценку</h3>
-        <form method="POST">
-            <select name="student_id">
-                {% for student in students %}
-                    <option value="{{ student.id }}">{{ student.name }}</option>
-                {% endfor %}
-            </select>
+        <form method="POST" action="{{ url_for('add_grade') }}" class="grade-form">
+            <div class="form-row">
+                <label for="student_id">Студент</label>
+                <select id="student_id" name="student_id" class="input-field" required>
+                    {% for student in students %}
+                        <option value="{{ student.id }}">{{ student.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
 
-            <select name="subject_id">
-                {% for subject in subjects %}
-                    <option value="{{ subject.id }}">{{ subject.name }}</option>
-                {% endfor %}
-            </select>
+            <div class="form-row">
+                <label for="subject">Предмет</label>
+                <select id="subject" name="subject" class="input-field" required>
+                    {% for subject in subjects %}
+                        <option value="{{ subject.name }}">{{ subject.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
 
-            <input type="number" name="value" placeholder="Оценка">
+            <div class="form-row compact-row">
+                <label for="value">Оценка</label>
+                <input id="value" type="number" name="value" min="2" max="5" class="grade-input" placeholder="2-5" required>
+            </div>
 
-            <button class="btn">Сохранить</button>
+            <button class="btn" type="submit">Сохранить</button>
         </form>
     </div>
 
