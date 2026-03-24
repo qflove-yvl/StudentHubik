@@ -101,6 +101,17 @@
     <p class="muted-text" style="margin-top:8px;">Одобрено: {{ verified_users_count|default(0) }} из {{ total_users_count|default(0) }}.</p>
 </section>
 
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:10px;">Операционные алерты</h2>
+    <ul class="alerts-list">
+        <li class="alert-item {% if pending_students|length > 20 %}alert-item-danger{% endif %}">Новые заявки студентов: <strong>{{ pending_students|length }}</strong></li>
+        <li class="alert-item {% if pending_teachers|length > 10 %}alert-item-danger{% endif %}">Новые заявки преподавателей: <strong>{{ pending_teachers|length }}</strong></li>
+        <li class="alert-item {% if approval_rate|default(0) < 60 %}alert-item-warn{% endif %}">Процент одобрения: <strong>{{ approval_rate|default(0) }}%</strong></li>
+        <li class="alert-item">Пользователей в выборке: <strong>{{ total_filtered|default(0) }}</strong></li>
+    </ul>
+</section>
+
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:14px;">Управление группами</h2>
     <form method="POST" action="{{ url_for('admin_add_group') }}" style="margin-bottom:14px;max-width:500px;">

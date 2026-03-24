@@ -57,6 +57,8 @@
     <div class="journal-toolbar-actions">
       <input id="journalStudentFilter" type="text" class="input-field" placeholder="Быстрый поиск по ФИО" style="margin:0;max-width:260px;">
       <label class="journal-toggle"><input id="riskOnlyToggle" type="checkbox"> Только Н/А</label>
+      <label class="journal-toggle"><input id="toggleComments" type="checkbox" checked> Показать комментарии</label>
+      <button type="button" class="btn" id="jumpToTodayBtn" style="padding:10px 12px;">К сегодняшнему дню</button>
       <button type="button" class="btn" id="fillAbsenceDayBtn" style="padding:10px 12px;">Заполнить Н за день</button>
     </div>
   </div>
@@ -86,7 +88,7 @@
               {% set key = (st.id, d) %}
               <td>
                 <input name="cell_{{ st.id }}_{{ d }}" class="input-field journal-cell" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5" maxlength="3">
-                <input name="comment_{{ st.id }}_{{ d }}" class="input-field journal-comment" value="{{ journal_comments.get(key, '') }}" placeholder="комментарий">
+                <input name="comment_{{ st.id }}_{{ d }}" class="input-field journal-comment journal-comment-input" value="{{ journal_comments.get(key, '') }}" placeholder="комментарий">
               </td>
             {% endfor %}
             <td>{{ journal_status.get(st.id, {}).get('n_count', 0) }}</td>
@@ -202,6 +204,8 @@
   const nameFilter = document.getElementById('journalStudentFilter');
   const riskOnly = document.getElementById('riskOnlyToggle');
   const fillAbsenceDayBtn = document.getElementById('fillAbsenceDayBtn');
+  const toggleComments = document.getElementById('toggleComments');
+  const jumpToTodayBtn = document.getElementById('jumpToTodayBtn');
   const rows = Array.from(document.querySelectorAll('.journal-row'));
 
   const applyFilter = () => {
@@ -252,6 +256,36 @@
   if (form) {
     form.addEventListener('submit', () => {
       try { localStorage.removeItem(draftKey); } catch (e) {}
+    });
+  }
+
+
+  if (toggleComments) {
+    toggleComments.addEventListener('change', () => {
+      const visible = !!toggleComments.checked;
+      document.querySelectorAll('.journal-comment-input').forEach((input) => {
+        input.style.display = visible ? '' : 'none';
+      });
+    });
+  }
+
+  if (jumpToTodayBtn) {
+    jumpToTodayBtn.addEventListener('click', () => {
+      const monthInput = document.querySelector('input[name="journal_month"]');
+      const monthValue = monthInput ? monthInput.value : '';
+      const today = new Date();
+      const todayMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+      if (monthValue && monthValue !== todayMonth) {
+        alert('Открыт не текущий месяц, переход к сегодняшнему дню недоступен.');
+        return;
+      }
+      const day = today.getDate();
+      const headCell = table.querySelector(`thead th:nth-child(${day + 1})`);
+      if (headCell) {
+        headCell.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        headCell.classList.add('today-highlight');
+        setTimeout(() => headCell.classList.remove('today-highlight'), 1800);
+      }
     });
   }
 

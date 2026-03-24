@@ -52,6 +52,18 @@
     </div>
 </section>
 
+
+<section class="card list-card student-grades">
+    <h2>Калькулятор цели</h2>
+    <p class="muted-text">Поставь цель по среднему баллу и количество будущих оценок — система подскажет, какой средний нужен дальше.</p>
+    <div class="goal-grid">
+        <input id="goalTargetAvg" type="number" class="input-field" min="1" max="5" step="0.1" placeholder="Желаемый средний (например 4.3)">
+        <input id="goalUpcomingCount" type="number" class="input-field" min="1" max="30" step="1" placeholder="Сколько оценок впереди">
+        <button id="goalCalcBtn" type="button" class="btn">Рассчитать</button>
+    </div>
+    <p id="goalCalcResult" class="muted-text" style="margin-top:8px;">Текущий средний: <strong>{{ average_grade }}</strong>.</p>
+</section>
+
 <section class="card list-card student-grades">
     <h2>Успеваемость по предметам</h2>
 
@@ -129,6 +141,34 @@ if (studentSearch && studentTable) {
         });
     });
 }
+
+
+const goalBtn = document.getElementById('goalCalcBtn');
+if (goalBtn) {
+    goalBtn.addEventListener('click', () => {
+        const target = parseFloat(document.getElementById('goalTargetAvg')?.value || '0');
+        const upcoming = parseInt(document.getElementById('goalUpcomingCount')?.value || '0', 10);
+        const currentAvg = parseFloat('{{ average_grade|default(0) }}') || 0;
+        const currentCount = parseInt('{{ grades|length }}', 10) || 0;
+        const result = document.getElementById('goalCalcResult');
+        if (!result) return;
+        if (!target || !upcoming || target < 1 || target > 5) {
+            result.textContent = 'Укажи корректные значения: цель 1-5 и количество оценок > 0.';
+            return;
+        }
+        const required = ((target * (currentCount + upcoming)) - (currentAvg * currentCount)) / upcoming;
+        if (required > 5) {
+            result.textContent = `Чтобы получить ${target}, нужно в среднем ${required.toFixed(2)} — это выше максимума 5.`;
+            return;
+        }
+        if (required <= 1) {
+            result.textContent = `Цель ${target} уже достижима даже при среднем ${required.toFixed(2)} на следующих оценках.`;
+            return;
+        }
+        result.textContent = `Для цели ${target} нужен средний ${required.toFixed(2)} на следующих ${upcoming} оценках.`;
+    });
+}
+
 </script>
 
 {% endblock %}
