@@ -60,6 +60,10 @@
       <label class="journal-toggle"><input id="toggleComments" type="checkbox" checked> Показать комментарии</label>
       <button type="button" class="btn" id="jumpToTodayBtn" style="padding:10px 12px;">К сегодняшнему дню</button>
       <button type="button" class="btn" id="fillAbsenceDayBtn" style="padding:10px 12px;">Заполнить Н за день</button>
+      <button type="button" class="btn" id="clearSelectedBtn" style="padding:10px 12px;">Очистить выделенное</button>
+      <button type="button" class="btn" id="undoJournalBtn" style="padding:10px 12px;">↶</button>
+      <button type="button" class="btn" id="redoJournalBtn" style="padding:10px 12px;">↷</button>
+      <span id="journalDirtyCounter" class="status-chip">Нет изменений</span>
     </div>
   </div>
 
@@ -70,6 +74,8 @@
     <input type="hidden" name="journal_group" value="{{ selected_group }}">
     <input type="hidden" name="journal_subject_id" value="{{ journal_subject.id }}">
     <input type="hidden" name="journal_month" value="{{ journal_month }}">
+    <input type="hidden" name="journal_changed_fields" id="journalChangedFields" value="">
+    <input type="hidden" name="journal_partial_save" id="journalPartialSave" value="0">
 
     <div class="table-wrap journal-wrap">
       <table class="grade-table journal-table">
@@ -82,13 +88,14 @@
         </thead>
         <tbody>
           {% for st in journal_students %}
-          <tr class="journal-row" data-student-name="{{ st.name|lower }}" data-risk="{{ 1 if journal_status.get(st.id, {}).get('na') else 0 }}">
+          {% set row_index = loop.index0 %}
+          <tr class="journal-row" data-row="{{ row_index }}" data-student-name="{{ st.name|lower }}" data-risk="{{ 1 if journal_status.get(st.id, {}).get('na') else 0 }}">
             <td class="sticky-col"><strong>{{ st.name }}</strong></td>
             {% for d in range(1, days_in_month + 1) %}
               {% set key = (st.id, d) %}
               <td>
-                <input name="cell_{{ st.id }}_{{ d }}" class="input-field journal-cell" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5" maxlength="3">
-                <input name="comment_{{ st.id }}_{{ d }}" class="input-field journal-comment journal-comment-input" value="{{ journal_comments.get(key, '') }}" placeholder="комментарий">
+                <input name="cell_{{ st.id }}_{{ d }}" class="input-field journal-cell" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5" maxlength="3" data-row="{{ row_index }}" data-col="{{ d }}">
+                <input name="comment_{{ st.id }}_{{ d }}" class="input-field journal-comment journal-comment-input" value="{{ journal_comments.get(key, '') }}" placeholder="комментарий" data-row="{{ row_index }}" data-col="{{ d }}">
               </td>
             {% endfor %}
             <td>{{ journal_status.get(st.id, {}).get('n_count', 0) }}</td>
@@ -182,31 +189,92 @@
   const table = document.querySelector('.journal-table');
   if (!table) return;
 
+  const form = document.getElementById('journalForm');
   const cells = Array.from(table.querySelectorAll('.journal-cell'));
-  cells.forEach((cell, index) => {
-    cell.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        const next = cells[index + 1] || cells[0];
-        if (next) next.focus();
-      }
-    });
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      const form = document.getElementById('journalForm');
-      if (form) form.submit();
-    }
-  });
-
+  const journalInputs = Array.from(table.querySelectorAll('.journal-cell, .journal-comment'));
+  const rows = Array.from(document.querySelectorAll('.journal-row'));
   const nameFilter = document.getElementById('journalStudentFilter');
   const riskOnly = document.getElementById('riskOnlyToggle');
   const fillAbsenceDayBtn = document.getElementById('fillAbsenceDayBtn');
   const toggleComments = document.getElementById('toggleComments');
   const jumpToTodayBtn = document.getElementById('jumpToTodayBtn');
-  const rows = Array.from(document.querySelectorAll('.journal-row'));
+  const clearSelectedBtn = document.getElementById('clearSelectedBtn');
+  const undoJournalBtn = document.getElementById('undoJournalBtn');
+  const redoJournalBtn = document.getElementById('redoJournalBtn');
+  const dirtyCounter = document.getElementById('journalDirtyCounter');
+  const changedInput = document.getElementById('journalChangedFields');
+  const partialSaveInput = document.getElementById('journalPartialSave');
+  const originalValues = new Map(journalInputs.map((input) => [input.name, input.value]));
+  const changedFields = new Set();
+  const selectedCells = new Set();
+  const history = [];
+  const redoStack = [];
+  const cellByPosition = new Map(cells.map((input) => [`${input.dataset.row}:${input.dataset.col}`, input]));
+  let anchorCell = null;
+
+  const showToast = (message) => {
+    let toast = document.getElementById('journalToast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'journalToast';
+      toast.className = 'journal-toast';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2200);
+  };
+
+  const updateDirtyState = () => {
+    changedFields.clear();
+    journalInputs.forEach((input) => {
+      const initial = originalValues.get(input.name) || '';
+      input.classList.toggle('journal-dirty', input.value !== initial);
+      if (input.value !== initial) changedFields.add(input.name);
+    });
+    if (changedInput) changedInput.value = Array.from(changedFields).join(',');
+    if (dirtyCounter) {
+      dirtyCounter.textContent = changedFields.size ? `Изменено: ${changedFields.size}` : 'Нет изменений';
+      dirtyCounter.classList.toggle('badge-danger', changedFields.size > 0);
+    }
+  };
+
+  const setInputValue = (input, value, record = true) => {
+    if (!input || input.value === value) return;
+    const previous = input.value;
+    input.value = value;
+    if (record) {
+      history.push({ input, previous, next: value });
+      redoStack.length = 0;
+    }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  const clearSelection = () => {
+    selectedCells.forEach((input) => input.closest('td')?.classList.remove('journal-selected'));
+    selectedCells.clear();
+  };
+
+  const selectCell = (input, append = false) => {
+    if (!append) clearSelection();
+    selectedCells.add(input);
+    input.closest('td')?.classList.add('journal-selected');
+    anchorCell = anchorCell || input;
+  };
+
+  const selectRange = (from, to) => {
+    clearSelection();
+    const rowStart = Math.min(parseInt(from.dataset.row, 10), parseInt(to.dataset.row, 10));
+    const rowEnd = Math.max(parseInt(from.dataset.row, 10), parseInt(to.dataset.row, 10));
+    const colStart = Math.min(parseInt(from.dataset.col, 10), parseInt(to.dataset.col, 10));
+    const colEnd = Math.max(parseInt(from.dataset.col, 10), parseInt(to.dataset.col, 10));
+    for (let row = rowStart; row <= rowEnd; row += 1) {
+      for (let col = colStart; col <= colEnd; col += 1) {
+        const target = cellByPosition.get(`${row}:${col}`);
+        if (target) selectCell(target, true);
+      }
+    }
+  };
 
   const applyFilter = () => {
     const term = (nameFilter?.value || '').toLowerCase().trim();
@@ -218,47 +286,109 @@
     });
   };
 
+  cells.forEach((cell, index) => {
+    cell.addEventListener('focus', () => {
+      if (!selectedCells.has(cell)) selectCell(cell);
+    });
+    cell.addEventListener('click', (event) => {
+      if (event.shiftKey && anchorCell) {
+        selectRange(anchorCell, cell);
+      } else {
+        anchorCell = cell;
+        selectCell(cell, event.ctrlKey || event.metaKey);
+      }
+    });
+    cell.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const next = cells[index + 1] || cells[0];
+        if (next) next.focus();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        undoJournalBtn?.click();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        redoJournalBtn?.click();
+      }
+    });
+    cell.addEventListener('paste', (event) => {
+      const raw = event.clipboardData?.getData('text');
+      if (!raw || (!raw.includes('\t') && !raw.includes('\n'))) return;
+      event.preventDefault();
+      const startRow = parseInt(cell.dataset.row, 10);
+      const startCol = parseInt(cell.dataset.col, 10);
+      raw.trim().split(/\r?\n/).forEach((line, rowOffset) => {
+        line.split('\t').forEach((value, colOffset) => {
+          const target = cellByPosition.get(`${startRow + rowOffset}:${startCol + colOffset}`);
+          if (target) setInputValue(target, value.trim());
+        });
+      });
+      showToast('Вставлено из таблицы');
+    });
+  });
+
+  journalInputs.forEach((input) => input.addEventListener('input', updateDirtyState));
   if (nameFilter) nameFilter.addEventListener('input', applyFilter);
   if (riskOnly) riskOnly.addEventListener('change', applyFilter);
 
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      if (form) form.submit();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && selectedCells.size > 1) {
+      event.preventDefault();
+      const selected = Array.from(selectedCells);
+      const rowsList = selected.map((input) => parseInt(input.dataset.row, 10));
+      const colsList = selected.map((input) => parseInt(input.dataset.col, 10));
+      const rowStart = Math.min(...rowsList);
+      const rowEnd = Math.max(...rowsList);
+      const colStart = Math.min(...colsList);
+      const colEnd = Math.max(...colsList);
+      const matrix = [];
+      for (let row = rowStart; row <= rowEnd; row += 1) {
+        const line = [];
+        for (let col = colStart; col <= colEnd; col += 1) {
+          line.push(cellByPosition.get(`${row}:${col}`)?.value || '');
+        }
+        matrix.push(line.join('\t'));
+      }
+      navigator.clipboard?.writeText(matrix.join('\n'));
+      showToast('Выделение скопировано');
+    }
+  });
+
   const draftKey = `journal_draft_${location.pathname}_${location.search}`;
   const loadDraft = () => {
-    try {
-      const raw = localStorage.getItem(draftKey);
-      if (!raw) return;
-      const draft = JSON.parse(raw);
-      cells.forEach((cell) => {
-        if (draft[cell.name] !== undefined && !cell.value) cell.value = draft[cell.name];
-      });
-      const comments = Array.from(table.querySelectorAll('.journal-comment'));
-      comments.forEach((comment) => {
-        if (draft[comment.name] !== undefined && !comment.value) comment.value = draft[comment.name];
-      });
-    } catch (e) {}
+    const raw = localStorage.getItem(draftKey);
+    if (!raw) return;
+    const draft = JSON.parse(raw);
+    journalInputs.forEach((input) => {
+      if (draft[input.name] !== undefined && !input.value) input.value = draft[input.name];
+    });
+    updateDirtyState();
   };
 
   const saveDraft = () => {
-    try {
-      const draft = {};
-      Array.from(table.querySelectorAll('.journal-cell, .journal-comment')).forEach((input) => {
-        if (input.value) draft[input.name] = input.value;
-      });
-      localStorage.setItem(draftKey, JSON.stringify(draft));
-    } catch (e) {}
+    const draft = {};
+    journalInputs.forEach((input) => {
+      if (input.value) draft[input.name] = input.value;
+    });
+    localStorage.setItem(draftKey, JSON.stringify(draft));
   };
 
   loadDraft();
-  Array.from(table.querySelectorAll('.journal-cell, .journal-comment')).forEach((input) => {
-    input.addEventListener('input', saveDraft);
-  });
+  journalInputs.forEach((input) => input.addEventListener('input', saveDraft));
 
-  const form = document.getElementById('journalForm');
   if (form) {
     form.addEventListener('submit', () => {
-      try { localStorage.removeItem(draftKey); } catch (e) {}
+      updateDirtyState();
+      if (partialSaveInput) partialSaveInput.value = '1';
+      localStorage.removeItem(draftKey);
     });
   }
-
 
   if (toggleComments) {
     toggleComments.addEventListener('change', () => {
@@ -297,13 +427,42 @@
       rows.forEach((row) => {
         if (row.style.display === 'none') return;
         const targetInput = row.querySelector(`input[name^="cell_"][name$="_${day}"]`);
-        if (targetInput && !targetInput.value.trim()) {
-          targetInput.value = 'Н';
-        }
+        if (targetInput && !targetInput.value.trim()) setInputValue(targetInput, 'Н');
       });
       saveDraft();
+      showToast('Пустые клетки дня заполнены Н');
     });
   }
+
+  if (clearSelectedBtn) {
+    clearSelectedBtn.addEventListener('click', () => {
+      selectedCells.forEach((input) => setInputValue(input, ''));
+      saveDraft();
+      showToast('Выделение очищено');
+    });
+  }
+
+  if (undoJournalBtn) {
+    undoJournalBtn.addEventListener('click', () => {
+      const item = history.pop();
+      if (!item) return;
+      redoStack.push(item);
+      item.input.value = item.previous;
+      item.input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  if (redoJournalBtn) {
+    redoJournalBtn.addEventListener('click', () => {
+      const item = redoStack.pop();
+      if (!item) return;
+      history.push(item);
+      item.input.value = item.next;
+      item.input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  updateDirtyState();
 })();
 </script>
 

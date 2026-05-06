@@ -6,6 +6,7 @@ from flask_migrate import Migrate
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 import csv
 import io
 import os
@@ -35,8 +36,16 @@ try:
 except ImportError:  # optional dependency in local dev
     sentry_sdk = None
 
+def normalize_database_url(raw_url):
+    database_url = raw_url or 'sqlite:///site.db'
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    return database_url
+
+
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///site.db')
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+app.config['SQLALCHEMY_DATABASE_URI'] = normalize_database_url(os.getenv('DATABASE_URL'))
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key')
 app.config['ADMIN_EMAIL'] = os.getenv('ADMIN_EMAIL', 'admin@studenthubik.local').lower()
@@ -54,12 +63,14 @@ app.config['SMTP_USE_SSL'] = os.getenv('SMTP_USE_SSL', '0') == '1'
 app.config['SMTP_TIMEOUT_SECONDS'] = int(os.getenv('SMTP_TIMEOUT_SECONDS', '15'))
 app.config['SENTRY_DSN'] = os.getenv('SENTRY_DSN', '')
 app.config['ENVIRONMENT'] = os.getenv('ENVIRONMENT', 'development')
-app.config['REQUIRE_STRONG_SECRET_IN_PROD'] = os.getenv('REQUIRE_STRONG_SECRET_IN_PROD', '1') == '1'
+app.config['REQUIRE_STRONG_SECRET_IN_PROD'] = os.getenv('REQUIRE_STRONG_SECRET_IN_PROD', '0') == '1'
 app.config['PASSWORD_RESET_MIN_INTERVAL_SECONDS'] = int(os.getenv('PASSWORD_RESET_MIN_INTERVAL_SECONDS', '60'))
 app.config['DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL'] = os.getenv('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL', '1') == '1'
 app.config['SCHEDULE_UPLOAD_DIR'] = os.path.join(app.instance_path, 'schedules')
 app.config['MAX_SCHEDULE_HISTORY'] = int(os.getenv('MAX_SCHEDULE_HISTORY', '20'))
 app.config['COLLEGE_NAME'] = os.getenv('COLLEGE_NAME', 'Красноярский колледж отраслевых технологий и предпринимательства')
+app.config['SESSION_COOKIE_SAMESITE'] = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax')
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', '1') == '1' if os.getenv('ENVIRONMENT') == 'production' else False
 
 
 db = SQLAlchemy(app)
@@ -333,7 +344,9 @@ def validate_runtime_config():
     if app.config.get('ENVIRONMENT') == 'production' and app.config.get('REQUIRE_STRONG_SECRET_IN_PROD'):
         secret_key = app.config.get('SECRET_KEY', '')
         if secret_key in {'', 'dev-key'} or len(secret_key) < 32:
-            raise RuntimeError('Unsafe SECRET_KEY for production. Set a strong SECRET_KEY (>=32 chars).')
+            raise RuntimeError('Unsafe SECRET_KEY for production. Set a strong SECRET_KEY (>=32 chars) or set REQUIRE_STRONG_SECRET_IN_PROD=0 for a temporary deploy.')
+    elif app.config.get('ENVIRONMENT') == 'production' and app.config.get('SECRET_KEY') in {'', 'dev-key'}:
+        app.logger.warning('Production deploy is using the default SECRET_KEY. Set SECRET_KEY in Railway variables for stable sessions.')
 
 
 def init_error_monitoring():
@@ -1856,12 +1869,18 @@ def teacher_dashboard():
                 return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=journal_month_post, group='all'))
 
             journal_students = [s for s in students if s.group_id and groups_by_id.get(s.group_id, '').upper() == group_name]
+            partial_save = request.form.get('journal_partial_save') == '1'
+            changed_field_names = {
+                field_name for field_name in request.form.get('journal_changed_fields', '').split(',') if field_name
+            } if partial_save else None
             updated = 0
             for student in journal_students:
                 for day in range(1, dim + 1):
                     key = f'cell_{student.id}_{day}'
-                    raw_value = request.form.get(key, '').strip()
                     comment_key = f'comment_{student.id}_{day}'
+                    if changed_field_names is not None and key not in changed_field_names and comment_key not in changed_field_names:
+                        continue
+                    raw_value = request.form.get(key, '').strip()
                     raw_comment = request.form.get(comment_key, '').strip()
                     target_dt = datetime(ms.year, ms.month, day, 12, 0, 0)
 
@@ -2492,4 +2511,6 @@ if __name__ == '__main__':
         if not app.logger.handlers:
             app.logger.addHandler(log_handler)
     app.logger.setLevel(logging.INFO)
-    app.run(debug=True)
+    port = int(os.getenv('PORT', '5000'))
+    debug_enabled = app.config.get('ENVIRONMENT') != 'production'
+    app.run(host='0.0.0.0', port=port, debug=debug_enabled)
