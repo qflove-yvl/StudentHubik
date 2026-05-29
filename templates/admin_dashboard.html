@@ -254,13 +254,23 @@
                 <tbody>
                     {% for student in approved_students %}
                     <tr>
-                        <td>{{ student.name }}</td>
-                        <td>{{ student.email }}</td>
-                        <td>{{ groups_by_id.get(student.group_id, '—') if student.group_id else '—' }}</td>
+                        <td><input form="student-update-{{ student.id }}" type="text" name="name" class="input-field admin-inline-input" value="{{ student.name }}" required></td>
+                        <td><input form="student-update-{{ student.id }}" type="email" name="email" class="input-field admin-inline-input" value="{{ student.email }}" required></td>
                         <td>
-                            <form method="POST" action="{{ url_for('admin_delete_student', user_id=student.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить аккаунт</button>
+                            <select form="student-update-{{ student.id }}" name="group_id" class="input-field admin-inline-input">
+                                <option value="">Без группы</option>
+                                {% for group in all_groups %}<option value="{{ group.id }}" {% if student.group_id == group.id %}selected{% endif %}>{{ group.name }}</option>{% endfor %}
+                            </select>
+                            <input form="student-update-{{ student.id }}" type="text" name="telegram" class="input-field admin-inline-input" value="{{ student.telegram or '' }}" placeholder="Контакт">
+                        </td>
+                        <td>
+                            <form id="student-update-{{ student.id }}" method="POST" action="{{ url_for('admin_update_user', user_id=student.id) }}" style="display:inline-block;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="btn" type="submit">Сохранить</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('admin_delete_student', user_id=student.id) }}" style="display:inline-block;margin-left:6px;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>
                             </form>
                         </td>
                     </tr>
@@ -301,10 +311,20 @@
     {% if approved_teachers %}
     <div class="table-wrap">
         <table class="grade-table">
-            <thead><tr><th>ФИО</th><th>Email</th><th>Telegram</th></tr></thead>
+            <thead><tr><th>ФИО</th><th>Email</th><th>Контакт</th><th>Действие</th></tr></thead>
             <tbody>
             {% for teacher in approved_teachers %}
-                <tr><td>{{ teacher.name }}</td><td>{{ teacher.email }}</td><td>{{ teacher.telegram or '—' }}</td></tr>
+                <tr>
+                    <td><input form="teacher-update-{{ teacher.id }}" type="text" name="name" class="input-field admin-inline-input" value="{{ teacher.name }}" required></td>
+                    <td><input form="teacher-update-{{ teacher.id }}" type="email" name="email" class="input-field admin-inline-input" value="{{ teacher.email }}" required></td>
+                    <td><input form="teacher-update-{{ teacher.id }}" type="text" name="telegram" class="input-field admin-inline-input" value="{{ teacher.telegram or '' }}" placeholder="Контакт"></td>
+                    <td>
+                        <form id="teacher-update-{{ teacher.id }}" method="POST" action="{{ url_for('admin_update_user', user_id=teacher.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="btn" type="submit">Сохранить</button>
+                        </form>
+                    </td>
+                </tr>
             {% endfor %}
             </tbody>
         </table>

@@ -9,8 +9,15 @@
         <label class="field-label" for="name">Имя</label>
         <input id="name" type="text" name="name" class="input-field" value="{{ current_user.name }}" required>
 
-        <label class="field-label" for="telegram">Telegram (необязательно)</label>
-        <input id="telegram" type="text" name="telegram" class="input-field" value="{{ current_user.telegram or '' }}" placeholder="@username">
+        <label class="field-label" for="telegram">Контакт для связи (Telegram / VK / WhatsApp / телефон)</label>
+        <input id="telegram" type="text" name="telegram" class="input-field" value="{{ current_user.telegram or '' }}" placeholder="@username, vk.com/..., +7...">
+
+        <hr style="border-color:rgba(255,255,255,0.12);margin:18px 0;">
+        <h2 style="margin-bottom:12px;">Смена пароля</h2>
+        <p class="muted-text" style="margin-bottom:12px;">Оставьте поля пустыми, если пароль менять не нужно.</p>
+        <input type="password" name="current_password" class="input-field" placeholder="Текущий пароль">
+        <input type="password" name="new_password" class="input-field" placeholder="Новый пароль" minlength="6">
+        <input type="password" name="confirm_password" class="input-field" placeholder="Повторите новый пароль" minlength="6">
 
         <button type="submit" class="btn">Сохранить профиль</button>
     </form>

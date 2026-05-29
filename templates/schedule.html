@@ -30,10 +30,10 @@
         </div>
 
         <div>
-            <label class="field-label" for="group_mode">Режим группы</label>
+            <label class="field-label" for="group_mode">Как выбрать группу</label>
             <select id="group_mode" name="group" class="input-field" style="margin:0;min-width:180px;">
-                <option value="my" {% if group_filter_mode == 'my' %}selected{% endif %}>Моя группа</option>
-                <option value="all" {% if group_filter_mode == 'all' %}selected{% endif %}>Выбрать вручную</option>
+                <option value="my" {% if group_filter_mode == 'my' %}selected{% endif %}>Автоматически из профиля</option>
+                <option value="all" {% if group_filter_mode == 'all' %}selected{% endif %}>Ввести группу справа</option>
             </select>
         </div>
 

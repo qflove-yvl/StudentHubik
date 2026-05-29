@@ -5,7 +5,9 @@
     <div class="auth-card">
 
         <div class="auth-header">
-            <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik">
+            <a href="{{ url_for('index') }}" class="auth-logo-link" aria-label="На главную">
+                <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik">
+            </a>
             <h1>Регистрация</h1>
             <p>Введите реальные данные для модерации админом</p>
         </div>

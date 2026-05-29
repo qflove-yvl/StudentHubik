@@ -57,9 +57,10 @@
     <div class="journal-toolbar-actions">
       <input id="journalStudentFilter" type="text" class="input-field" placeholder="Быстрый поиск по ФИО" style="margin:0;max-width:260px;">
       <label class="journal-toggle"><input id="riskOnlyToggle" type="checkbox"> Только Н/А</label>
-      <label class="journal-toggle"><input id="toggleComments" type="checkbox" checked> Показать комментарии</label>
+      <label class="journal-toggle"><input id="toggleComments" type="checkbox"> Показать комментарии</label>
       <button type="button" class="btn" id="jumpToTodayBtn" style="padding:10px 12px;">К сегодняшнему дню</button>
-      <button type="button" class="btn" id="fillAbsenceDayBtn" style="padding:10px 12px;">Заполнить Н за день</button>
+      <button type="button" class="btn" id="fillAbsenceDayBtn" style="padding:10px 12px;">Н в пустые клетки дня</button>
+      <button type="button" class="btn" id="clearAbsenceDayBtn" style="padding:10px 12px;">Очистить Н за день</button>
       <button type="button" class="btn" id="clearSelectedBtn" style="padding:10px 12px;">Очистить выделенное</button>
       <button type="button" class="btn" id="undoJournalBtn" style="padding:10px 12px;">↶</button>
       <button type="button" class="btn" id="redoJournalBtn" style="padding:10px 12px;">↷</button>
@@ -96,6 +97,7 @@
               <td>
                 <input name="cell_{{ st.id }}_{{ d }}" class="input-field journal-cell" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5" maxlength="3" data-row="{{ row_index }}" data-col="{{ d }}">
                 <input name="comment_{{ st.id }}_{{ d }}" class="input-field journal-comment journal-comment-input" value="{{ journal_comments.get(key, '') }}" placeholder="комментарий" data-row="{{ row_index }}" data-col="{{ d }}">
+                <button type="button" class="journal-comment-open" data-comment-name="comment_{{ st.id }}_{{ d }}" aria-label="Открыть комментарий">✎</button>
               </td>
             {% endfor %}
             <td>{{ journal_status.get(st.id, {}).get('n_count', 0) }}</td>
@@ -115,6 +117,17 @@
     <p class="muted-text">Выберите группу и предмет, чтобы открыть журнал.</p>
   {% endif %}
 </section>
+<div id="commentModal" class="comment-modal hidden" aria-hidden="true">
+  <div class="comment-modal-card">
+    <h3>Комментарий к ячейке</h3>
+    <p class="muted-text">Напишите полный комментарий — он сохранится вместе с журналом.</p>
+    <textarea id="commentModalText" class="input-field comment-modal-text" rows="7" placeholder="Комментарий, тема урока, пояснение..."></textarea>
+    <div class="comment-modal-actions">
+      <button type="button" class="btn secondary-btn" id="commentModalCancel">Отмена</button>
+      <button type="button" class="btn" id="commentModalSave">Сохранить</button>
+    </div>
+  </div>
+</div>
 
 <section class="card" style="margin-top:16px;">
   <h2 style="margin-bottom:10px;">Студенты по среднему баллу (ваши предметы)</h2>
@@ -196,6 +209,7 @@
   const nameFilter = document.getElementById('journalStudentFilter');
   const riskOnly = document.getElementById('riskOnlyToggle');
   const fillAbsenceDayBtn = document.getElementById('fillAbsenceDayBtn');
+  const clearAbsenceDayBtn = document.getElementById('clearAbsenceDayBtn');
   const toggleComments = document.getElementById('toggleComments');
   const jumpToTodayBtn = document.getElementById('jumpToTodayBtn');
   const clearSelectedBtn = document.getElementById('clearSelectedBtn');
@@ -239,10 +253,21 @@
     }
   };
 
+  const syncGradeTone = (input) => {
+    input.classList.remove('grade-bad', 'grade-mid', 'grade-good', 'grade-great', 'grade-absence');
+    const value = (input.value || '').trim().toUpperCase();
+    if (value === 'Н') input.classList.add('grade-absence');
+    else if (value === '2' || value === '1') input.classList.add('grade-bad');
+    else if (value === '3') input.classList.add('grade-mid');
+    else if (value === '4') input.classList.add('grade-good');
+    else if (value === '5') input.classList.add('grade-great');
+  };
+
   const setInputValue = (input, value, record = true) => {
     if (!input || input.value === value) return;
     const previous = input.value;
     input.value = value;
+    if (input.classList.contains('journal-cell')) syncGradeTone(input);
     if (record) {
       history.push({ input, previous, next: value });
       redoStack.length = 0;
@@ -329,6 +354,8 @@
     });
   });
 
+  cells.forEach(syncGradeTone);
+  cells.forEach((input) => input.addEventListener('input', () => syncGradeTone(input)));
   journalInputs.forEach((input) => input.addEventListener('input', updateDirtyState));
   if (nameFilter) nameFilter.addEventListener('input', applyFilter);
   if (riskOnly) riskOnly.addEventListener('change', applyFilter);
@@ -390,14 +417,52 @@
     });
   }
 
-  if (toggleComments) {
-    toggleComments.addEventListener('change', () => {
-      const visible = !!toggleComments.checked;
-      document.querySelectorAll('.journal-comment-input').forEach((input) => {
-        input.style.display = visible ? '' : 'none';
-      });
+  const syncCommentVisibility = () => {
+    const visible = !!toggleComments?.checked;
+    document.querySelectorAll('.journal-comment-input').forEach((input) => {
+      input.style.display = visible ? '' : 'none';
     });
+  };
+
+  if (toggleComments) {
+    toggleComments.addEventListener('change', syncCommentVisibility);
+    syncCommentVisibility();
   }
+
+  const commentModal = document.getElementById('commentModal');
+  const commentModalText = document.getElementById('commentModalText');
+  const commentModalSave = document.getElementById('commentModalSave');
+  const commentModalCancel = document.getElementById('commentModalCancel');
+  let activeCommentInput = null;
+
+  const closeCommentModal = () => {
+    commentModal?.classList.add('hidden');
+    commentModal?.setAttribute('aria-hidden', 'true');
+    activeCommentInput = null;
+  };
+
+  document.querySelectorAll('.journal-comment-open').forEach((button) => {
+    button.addEventListener('click', () => {
+      activeCommentInput = document.querySelector(`[name="${button.dataset.commentName}"]`);
+      if (!activeCommentInput || !commentModal || !commentModalText) return;
+      commentModalText.value = activeCommentInput.value || '';
+      commentModal.classList.remove('hidden');
+      commentModal.setAttribute('aria-hidden', 'false');
+      commentModalText.focus();
+    });
+  });
+
+  commentModalCancel?.addEventListener('click', closeCommentModal);
+  commentModal?.addEventListener('click', (event) => {
+    if (event.target === commentModal) closeCommentModal();
+  });
+  commentModalSave?.addEventListener('click', () => {
+    if (activeCommentInput && commentModalText) {
+      setInputValue(activeCommentInput, commentModalText.value);
+      saveDraft();
+    }
+    closeCommentModal();
+  });
 
   if (jumpToTodayBtn) {
     jumpToTodayBtn.addEventListener('click', () => {
@@ -434,11 +499,29 @@
     });
   }
 
+  if (clearAbsenceDayBtn) {
+    clearAbsenceDayBtn.addEventListener('click', () => {
+      const dayRaw = prompt('Введите номер дня месяца, где убрать только Н (1-31):');
+      const day = parseInt(dayRaw || '', 10);
+      if (!Number.isFinite(day) || day < 1 || day > 31) return;
+      rows.forEach((row) => {
+        if (row.style.display === 'none') return;
+        const targetInput = row.querySelector(`input[name^="cell_"][name$="_${day}"]`);
+        if (targetInput && targetInput.value.trim().toUpperCase() === 'Н') setInputValue(targetInput, '');
+      });
+      saveDraft();
+      showToast('Н за выбранный день очищены');
+    });
+  }
+
   if (clearSelectedBtn) {
     clearSelectedBtn.addEventListener('click', () => {
+      if (!selectedCells.size && document.activeElement?.classList?.contains('journal-cell')) {
+        selectCell(document.activeElement);
+      }
       selectedCells.forEach((input) => setInputValue(input, ''));
       saveDraft();
-      showToast('Выделение очищено');
+      showToast(`Очищено ячеек: ${selectedCells.size}`);
     });
   }
 

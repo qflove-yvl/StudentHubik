@@ -459,7 +459,7 @@ def build_student_subject_grade_rows(grades):
     result = []
     for subject_name, payload in sorted(by_subject.items(), key=lambda x: x[0].lower()):
         ordered = sorted(payload['grades'], key=lambda g: (g.graded_at or datetime.min, g.id))
-        values = [g.grade for g in ordered]
+        values = [g.grade for g in ordered if isinstance(g.grade, (int, float))]
         avg_value = round(sum(values) / len(values), 2) if values else 0
         result.append({'subject_name': subject_name, 'grades': ordered, 'avg': avg_value})
 
@@ -471,6 +471,8 @@ def build_student_progress_points(grades):
     points = []
     running = []
     for item in ordered:
+        if not isinstance(item.grade, (int, float)):
+            continue
         running.append(item.grade)
         points.append({
             'label': (item.graded_at or datetime.utcnow()).strftime('%d.%m'),
@@ -903,7 +905,10 @@ def initialize_database():
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    try:
+        return db.session.get(User, int(user_id))
+    except (TypeError, ValueError):
+        return None
 
 
 @app.route('/')
@@ -985,6 +990,9 @@ def register():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     role = request.args.get('role', 'student')
+
+    if current_user.is_authenticated and request.method == 'GET':
+        return redirect_to_role_dashboard()
 
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
@@ -1126,6 +1134,23 @@ def profile():
 
         current_user.name = name
         current_user.telegram = telegram
+
+        current_password = request.form.get('current_password', '')
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        if new_password or confirm_password or current_password:
+            if not check_password_hash(current_user.password, current_password):
+                flash('Текущий пароль указан неверно')
+                return redirect(url_for('profile'))
+            if len(new_password) < 6:
+                flash('Новый пароль должен быть не короче 6 символов')
+                return redirect(url_for('profile'))
+            if new_password != confirm_password:
+                flash('Новые пароли не совпадают')
+                return redirect(url_for('profile'))
+            current_user.password = generate_password_hash(new_password)
+            log_audit('change_password', f'user={current_user.id}', should_commit=False)
+
         db.session.commit()
         flash('Профиль обновлён')
         return redirect(url_for('profile'))
@@ -1153,7 +1178,14 @@ def settings():
 
 @app.route('/support')
 def support():
-    return render_template('support.html', support_username='@cestlavieq')
+    return render_template(
+        'support.html',
+        support_username=os.getenv('SUPPORT_USERNAME', '@cestlavieq'),
+        support_email=os.getenv('SUPPORT_EMAIL', app.config.get('ADMIN_EMAIL', '')),
+        support_telegram=os.getenv('SUPPORT_TELEGRAM', 'https://t.me/cestlavieq'),
+        support_vk=os.getenv('SUPPORT_VK', ''),
+        support_whatsapp=os.getenv('SUPPORT_WHATSAPP', '')
+    )
 
 
 @app.route('/privacy')
@@ -2313,6 +2345,54 @@ def reject_user(user_id):
     log_audit('reject_user', f'id={user_id}')
     flash('Заявка отклонена и аккаунт удалён')
     return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/user/<int:user_id>/update', methods=['POST'])
+@login_required
+def admin_update_user(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    user = User.query.filter(User.id == user_id, User.role.in_(['student', 'teacher'])).first()
+    if not user:
+        flash('Пользователь не найден')
+        return redirect(url_for('admin_dashboard', status='approved'))
+
+    name = request.form.get('name', '').strip()
+    email = request.form.get('email', '').strip().lower()
+    telegram = request.form.get('telegram', '').strip()
+
+    if not full_name_looks_valid(name):
+        flash('Введите полное ФИО пользователя')
+        return redirect(url_for('admin_dashboard', status='approved'))
+    if not email_looks_valid(email):
+        flash('Введите корректный email пользователя')
+        return redirect(url_for('admin_dashboard', status='approved'))
+
+    existing = User.query.filter(User.email == email, User.id != user.id).first()
+    if existing:
+        flash('Такой email уже занят другим пользователем')
+        return redirect(url_for('admin_dashboard', status='approved'))
+
+    user.name = name
+    user.email = email
+    user.telegram = telegram
+
+    if user.role == 'student':
+        group_id_raw = request.form.get('group_id', '')
+        try:
+            group_id = int(group_id_raw) if group_id_raw else None
+        except ValueError:
+            group_id = None
+        if group_id and Group.query.get(group_id):
+            user.group_id = group_id
+        elif not group_id:
+            user.group_id = None
+
+    db.session.commit()
+    log_audit('admin_update_user', f'id={user.id}, role={user.role}')
+    flash(f'Данные пользователя {user.name} обновлены')
+    return redirect(url_for('admin_dashboard', status='approved', role=user.role))
 
 
 @app.route('/admin/student/<int:user_id>/delete', methods=['POST'])

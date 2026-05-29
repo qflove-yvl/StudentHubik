@@ -26,7 +26,9 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 
 <div class="topbar">
     <div class="top-left">
-        <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo" alt="StudentHubik">
+        <a href="{{ url_for('index') }}" class="top-logo-link" aria-label="На главную">
+            <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo" alt="StudentHubik">
+        </a>
     </div>
 
     <div class="top-center">
@@ -58,12 +60,10 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 
     {% if current_user.is_authenticated %}
     <aside id="main-sidebar" class="sidebar">
-        <a href="{{ url_for('dashboard') }}" class="nav-link{% if request.endpoint == 'dashboard' %} active{% endif %}">Панель</a>
         <a href="{{ url_for('profile') }}" class="nav-link{% if request.endpoint == 'profile' %} active{% endif %}">Профиль</a>
         <a href="/schedule" class="nav-link{% if request.path.startswith('/schedule') %} active{% endif %}">Расписание</a>
         <a href="/notifications" class="nav-link{% if request.path.startswith('/notifications') %} active{% endif %}">Уведомления{% if unread_notifications|default(0) > 0 %} <span class="badge">{{ unread_notifications }}</span>{% endif %}</a>
         <a href="{{ url_for('settings') }}" class="nav-link{% if request.endpoint == 'settings' %} active{% endif %}">Настройки</a>
-        <a href="{{ url_for('status_page') }}" class="nav-link{% if request.endpoint == 'status_page' %} active{% endif %}">Статус системы</a>
         <a href="{{ url_for('support') }}" class="nav-link{% if request.endpoint == 'support' %} active{% endif %}">Помощь и поддержка</a>
         {% if current_user.role == 'student' %}
             <a href="{{ url_for('student_dashboard') }}" class="nav-link{% if request.endpoint == 'student_dashboard' %} active{% endif %}">Мои оценки</a>

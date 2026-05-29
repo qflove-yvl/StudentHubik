@@ -100,9 +100,11 @@
                     <td>
                         <div class="grade-strip">
                             {% for item in row.grades %}
-                                <div class="grade-chip" title="{{ item.comment or 'Без комментария' }}">
+                                {% set display_mark = item.mark if item.mark else item.grade %}
+                                {% set grade_tone = 'grade-absence' if item.mark else ('grade-bad' if item.grade is number and item.grade <= 2 else ('grade-mid' if item.grade is number and item.grade == 3 else ('grade-good' if item.grade is number and item.grade == 4 else ('grade-great' if item.grade is number and item.grade >= 5 else '')))) %}
+                                <div class="grade-chip {{ grade_tone }}" title="{{ item.comment or 'Без комментария' }}">
                                     <div class="grade-date">{{ item.graded_at.strftime('%d.%m') if item.graded_at else '—' }}</div>
-                                    <div class="grade-number">{{ item.grade }}</div>
+                                    <div class="grade-number">{{ display_mark if display_mark is not none else '—' }}</div>
                                     <div class="grade-comment">Семестр {{ item.semester }}</div>
                                     {% if item.comment %}<div class="grade-comment">{{ item.comment }}</div>{% endif %}
                                 </div>
