@@ -4,13 +4,19 @@
 <h1 class="page-title">Профиль пользователя</h1>
 
 <section class="card" style="max-width:640px;">
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label class="field-label" for="name">Имя</label>
         <input id="name" type="text" name="name" class="input-field" value="{{ current_user.name }}" required>
 
         <label class="field-label" for="telegram">Контакт для связи (Telegram / VK / WhatsApp / телефон)</label>
         <input id="telegram" type="text" name="telegram" class="input-field" value="{{ current_user.telegram or '' }}" placeholder="@username, vk.com/..., +7...">
+
+        <label class="field-label" for="avatar">Аватарка (PNG/JPG/WEBP/GIF)</label>
+        <div class="profile-avatar-row">
+            {% if user_avatar_url %}<img src="{{ user_avatar_url }}" class="profile-avatar-preview" alt="Текущая аватарка">{% endif %}
+            <input id="avatar" type="file" name="avatar" class="input-field" accept="image/png,image/jpeg,image/webp,image/gif">
+        </div>
 
         <hr style="border-color:rgba(255,255,255,0.12);margin:18px 0;">
         <h2 style="margin-bottom:12px;">Смена пароля</h2>

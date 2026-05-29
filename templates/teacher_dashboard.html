@@ -21,6 +21,16 @@
   <div class="card"><div class="card-title">Средний за курс</div><div class="card-value">{{ teacher_stats_safe.course_avg }}</div></div>
   <div class="card"><div class="card-title">Средний по текущему журналу</div><div class="card-value">{{ journal_summary_safe.avg }}</div></div>
 </div>
+{% if curator_group_name %}
+<section class="card curator-card" style="margin-top:16px;">
+  <h2 style="margin-bottom:10px;">Кураторская ведомость · {{ curator_group_name }}</h2>
+  <p class="muted-text" style="margin-bottom:12px;">В группе {{ curator_student_count }} студентов. Скачайте ведомость по всем предметам за месяц или текущий семестр.</p>
+  <div class="quick-actions">
+    <a href="{{ url_for('export_curator_report', period='month') }}" class="btn">Ведомость за месяц</a>
+    <a href="{{ url_for('export_curator_report', period='semester') }}" class="btn secondary-btn">Ведомость за семестр</a>
+  </div>
+</section>
+{% endif %}
 
 <section class="card" style="margin-top:16px;">
   <h2 style="margin-bottom:12px;">Журнал за месяц</h2>
@@ -159,6 +169,47 @@
   {% endif %}
 </section>
 
+
+<section class="card" style="margin-top:16px;">
+  <h2 style="margin-bottom:10px;">Быстрая оценка за отдельный урок</h2>
+  <p class="muted-text" style="margin-bottom:12px;">Если в один день было несколько уроков, добавьте отдельную оценку здесь — она не ограничена одной клеткой журнала.</p>
+  <form method="POST" class="journal-filter-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="create_grade">
+    <div>
+      <label class="field-label">Студент</label>
+      <select name="student_id" class="input-field" style="margin:0;min-width:220px;" required>
+        {% for st in students %}<option value="{{ st.id }}">{{ st.name }} · {{ groups_by_id.get(st.group_id, '—') }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="field-label">Предмет</label>
+      <select name="subject_id" class="input-field" style="margin:0;min-width:190px;" required>
+        {% for subj in subjects %}<option value="{{ subj.id }}">{{ subj.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="field-label">Оценка / Н</label>
+      <input name="value" class="input-field" style="margin:0;max-width:110px;" placeholder="5 или Н" maxlength="3" required>
+    </div>
+    <div>
+      <label class="field-label">Дата урока</label>
+      <input type="date" name="graded_at" class="input-field" style="margin:0;" required>
+    </div>
+    <div>
+      <label class="field-label">Семестр</label>
+      <select name="semester" class="input-field" style="margin:0;max-width:110px;">
+        <option value="1">1</option>
+        <option value="2">2</option>
+      </select>
+    </div>
+    <div style="flex:1;min-width:240px;">
+      <label class="field-label">Тема / комментарий</label>
+      <input name="comment" class="input-field" style="margin:0;" placeholder="Тема урока, комментарий">
+    </div>
+    <button class="btn" type="submit">Добавить оценку</button>
+  </form>
+</section>
 
 <section class="card" style="margin-top:16px;">
   <h2 style="margin-bottom:10px;">Последние оценки (редактирование)</h2>

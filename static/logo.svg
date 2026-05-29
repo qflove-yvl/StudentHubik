@@ -50,10 +50,13 @@
   <!-- TEXT -->
   <text x="65" y="38"
         font-size="23"
-        font-weight="700"
-        fill="#EDEDED"
+        font-weight="800"
+        fill="#111827"
+        stroke="#FFFFFF"
+        stroke-width="3"
+        paint-order="stroke fill"
         font-family="Inter, Arial, sans-serif">
     Student
-    <tspan fill="#EDEDED">Hubik</tspan>
+    <tspan fill="#2563EB" stroke="#FFFFFF" stroke-width="3" paint-order="stroke fill">Hubik</tspan>
   </text>
 </svg>

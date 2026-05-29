@@ -71,6 +71,8 @@ app.config['MAX_SCHEDULE_HISTORY'] = int(os.getenv('MAX_SCHEDULE_HISTORY', '20')
 app.config['COLLEGE_NAME'] = os.getenv('COLLEGE_NAME', 'Красноярский колледж отраслевых технологий и предпринимательства')
 app.config['SESSION_COOKIE_SAMESITE'] = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax')
 app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', '1') == '1' if os.getenv('ENVIRONMENT') == 'production' else False
+app.config['AVATAR_UPLOAD_DIR'] = os.path.join(app.root_path, 'static', 'avatars')
+app.config['AVATAR_ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
 
 
 db = SQLAlchemy(app)
@@ -834,6 +836,37 @@ def safe_url_for(endpoint, **values):
         return None
 
 
+def get_user_avatar_url(user_id):
+    if not user_id:
+        return ''
+    avatar_dir = app.config.get('AVATAR_UPLOAD_DIR')
+    for extension in sorted(app.config.get('AVATAR_ALLOWED_EXTENSIONS', set())):
+        filename = f'user_{user_id}.{extension}'
+        if os.path.exists(os.path.join(avatar_dir, filename)):
+            return url_for('static', filename=f'avatars/{filename}')
+    return ''
+
+
+def save_user_avatar(user, uploaded_file):
+    if not uploaded_file or not uploaded_file.filename:
+        return True, False, ''
+
+    original_name = secure_filename(uploaded_file.filename)
+    extension = original_name.rsplit('.', 1)[-1].lower() if '.' in original_name else ''
+    if extension not in app.config.get('AVATAR_ALLOWED_EXTENSIONS', set()):
+        return False, False, 'Загрузите аватар в формате PNG, JPG, WEBP или GIF'
+
+    avatar_dir = app.config.get('AVATAR_UPLOAD_DIR')
+    os.makedirs(avatar_dir, exist_ok=True)
+    for old_extension in app.config.get('AVATAR_ALLOWED_EXTENSIONS', set()):
+        old_path = os.path.join(avatar_dir, f'user_{user.id}.{old_extension}')
+        if os.path.exists(old_path):
+            os.remove(old_path)
+
+    uploaded_file.save(os.path.join(avatar_dir, f'user_{user.id}.{extension}'))
+    return True, True, ''
+
+
 def redirect_to_role_dashboard():
     if current_user.role == 'student':
         return redirect(url_for('student_dashboard'))
@@ -866,7 +899,8 @@ def inject_template_security():
         'ui_settings': default_ui,
         'unread_notifications': unread_notifications,
         'college_name': app.config.get('COLLEGE_NAME'),
-        'safe_url_for': safe_url_for
+        'safe_url_for': safe_url_for,
+        'user_avatar_url': get_user_avatar_url(current_user.id) if current_user.is_authenticated else ''
     }
 
 
@@ -888,6 +922,7 @@ def initialize_database():
 
     validate_runtime_config()
     os.makedirs(app.config.get('SCHEDULE_UPLOAD_DIR'), exist_ok=True)
+    os.makedirs(app.config.get('AVATAR_UPLOAD_DIR'), exist_ok=True)
     db.create_all()
     ensure_runtime_columns()
     ensure_default_groups()
@@ -1134,6 +1169,13 @@ def profile():
 
         current_user.name = name
         current_user.telegram = telegram
+
+        avatar_ok, avatar_changed, avatar_error = save_user_avatar(current_user, request.files.get('avatar'))
+        if not avatar_ok:
+            flash(avatar_error)
+            return redirect(url_for('profile'))
+        if avatar_changed:
+            log_audit('change_avatar', f'user={current_user.id}', should_commit=False)
 
         current_password = request.form.get('current_password', '')
         new_password = request.form.get('new_password', '')
@@ -1923,7 +1965,10 @@ def teacher_dashboard():
                     ).first()
 
                     if not raw_value:
-                        if existing and (existing.comment != raw_comment):
+                        if existing and not raw_comment:
+                            db.session.delete(existing)
+                            updated += 1
+                        elif existing and (existing.comment != raw_comment):
                             existing.comment = raw_comment[:300]
                             updated += 1
                         continue
@@ -2062,6 +2107,9 @@ def teacher_dashboard():
             'fill_rate': round((filled_cells / total_cells) * 100, 1) if total_cells else 0,
         }
 
+    curator_group_name = groups_by_id.get(current_user.group_id, '') if current_user.group_id else ''
+    curator_student_count = User.query.filter_by(role='student', is_verified=True, group_id=current_user.group_id).count() if current_user.group_id else 0
+
     return render_template(
         'teacher_dashboard.html',
         students=students,
@@ -2088,6 +2136,58 @@ def teacher_dashboard():
         journal_comments=journal_comments,
         journal_status=journal_status,
         journal_summary=journal_summary,
+        curator_group_name=curator_group_name,
+        curator_student_count=curator_student_count,
+    )
+
+
+@app.route('/teacher/curator-report')
+@login_required
+def export_curator_report():
+    if current_user.role != 'teacher' or not current_user.group_id:
+        return redirect_to_role_dashboard()
+
+    report_period = request.args.get('period', 'month')
+    now = datetime.utcnow()
+    if report_period == 'semester':
+        start_month = 1 if now.month <= 6 else 7
+        start_at = datetime(now.year, start_month, 1)
+        title = 'semester'
+    else:
+        start_at = datetime(now.year, now.month, 1)
+        title = 'month'
+
+    students_in_group = User.query.filter_by(role='student', is_verified=True, group_id=current_user.group_id).order_by(User.name).all()
+    student_ids = [student.id for student in students_in_group]
+    grades = []
+    if student_ids:
+        grades = (
+            Grade.query.join(Subject)
+            .filter(Grade.student_id.in_(student_ids), Grade.graded_at >= start_at)
+            .order_by(Grade.student_id, Subject.name, Grade.graded_at)
+            .all()
+        )
+
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(['student', 'subject', 'grade_or_mark', 'semester', 'comment', 'graded_at'])
+    students_by_id = {student.id: student.name for student in students_in_group}
+    for item in grades:
+        writer.writerow([
+            students_by_id.get(item.student_id, '—'),
+            item.subject.name if item.subject else '—',
+            item.mark or item.grade or '',
+            item.semester,
+            item.comment or '',
+            item.graded_at.isoformat() if item.graded_at else ''
+        ])
+
+    curator_group = Group.query.get(current_user.group_id)
+    group_name = curator_group.name if curator_group else 'group'
+    return Response(
+        '\ufeff' + stream.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename=curator_{group_name}_{title}.csv'}
     )
 
 
@@ -2378,7 +2478,7 @@ def admin_update_user(user_id):
     user.email = email
     user.telegram = telegram
 
-    if user.role == 'student':
+    if user.role in {'student', 'teacher'}:
         group_id_raw = request.form.get('group_id', '')
         try:
             group_id = int(group_id_raw) if group_id_raw else None

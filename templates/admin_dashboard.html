@@ -317,7 +317,13 @@
                 <tr>
                     <td><input form="teacher-update-{{ teacher.id }}" type="text" name="name" class="input-field admin-inline-input" value="{{ teacher.name }}" required></td>
                     <td><input form="teacher-update-{{ teacher.id }}" type="email" name="email" class="input-field admin-inline-input" value="{{ teacher.email }}" required></td>
-                    <td><input form="teacher-update-{{ teacher.id }}" type="text" name="telegram" class="input-field admin-inline-input" value="{{ teacher.telegram or '' }}" placeholder="Контакт"></td>
+                    <td>
+                        <input form="teacher-update-{{ teacher.id }}" type="text" name="telegram" class="input-field admin-inline-input" value="{{ teacher.telegram or '' }}" placeholder="Контакт">
+                        <select form="teacher-update-{{ teacher.id }}" name="group_id" class="input-field admin-inline-input" title="Кураторская группа">
+                            <option value="">Не куратор</option>
+                            {% for group in all_groups %}<option value="{{ group.id }}" {% if teacher.group_id == group.id %}selected{% endif %}>Куратор {{ group.name }}</option>{% endfor %}
+                        </select>
+                    </td>
                     <td>
                         <form id="teacher-update-{{ teacher.id }}" method="POST" action="{{ url_for('admin_update_user', user_id=teacher.id) }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
