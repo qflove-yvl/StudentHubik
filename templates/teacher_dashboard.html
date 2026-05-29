@@ -26,9 +26,21 @@
   <h2 style="margin-bottom:10px;">Кураторская ведомость · {{ curator_group_name }}</h2>
   <p class="muted-text" style="margin-bottom:12px;">В группе {{ curator_student_count }} студентов. Скачайте ведомость по всем предметам за месяц или текущий семестр.</p>
   <div class="quick-actions">
-    <a href="{{ url_for('export_curator_report', period='month') }}" class="btn">Ведомость за месяц</a>
-    <a href="{{ url_for('export_curator_report', period='semester') }}" class="btn secondary-btn">Ведомость за семестр</a>
+    <a href="{{ url_for('export_curator_report', period='month') }}" class="btn">Ведомость за месяц (Excel/CSV)</a>
+    <a href="{{ url_for('export_curator_report', period='semester') }}" class="btn secondary-btn">Ведомость за семестр (Excel/CSV)</a>
   </div>
+  {% if curator_recent_grades %}
+  <div class="table-wrap" style="margin-top:12px;">
+    <table class="grade-table solid-table">
+      <thead><tr><th>Студент</th><th>Предмет</th><th>Оценка/Н</th><th>Дата</th><th>Комментарий</th></tr></thead>
+      <tbody>
+      {% for item in curator_recent_grades %}
+        <tr><td>{{ item.student.name }}</td><td>{{ item.subject.name }}</td><td>{{ item.mark or item.grade }}</td><td>{{ item.graded_at.strftime('%d.%m.%Y') if item.graded_at else '—' }}</td><td>{{ item.comment or '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </section>
 {% endif %}
 
@@ -68,6 +80,9 @@
       <input id="journalStudentFilter" type="text" class="input-field" placeholder="Быстрый поиск по ФИО" style="margin:0;max-width:260px;">
       <label class="journal-toggle"><input id="riskOnlyToggle" type="checkbox"> Только Н/А</label>
       <label class="journal-toggle"><input id="toggleComments" type="checkbox"> Показать комментарии</label>
+      <input id="visibleDaysInput" type="text" class="input-field" placeholder="Даты: 1,2,15" style="margin:0;max-width:150px;">
+      <button type="button" class="btn" id="applyVisibleDaysBtn" style="padding:10px 12px;">Показать даты</button>
+      <button type="button" class="btn secondary-btn" id="showAllDaysBtn" style="padding:10px 12px;">Все даты</button>
       <button type="button" class="btn" id="jumpToTodayBtn" style="padding:10px 12px;">К сегодняшнему дню</button>
       <button type="button" class="btn" id="fillAbsenceDayBtn" style="padding:10px 12px;">Н в пустые клетки дня</button>
       <button type="button" class="btn" id="clearAbsenceDayBtn" style="padding:10px 12px;">Очистить Н за день</button>
@@ -93,7 +108,7 @@
         <thead>
           <tr>
             <th class="sticky-col sticky-head">ФИО</th>
-            {% for d in range(1, days_in_month + 1) %}<th>{{ d }}</th>{% endfor %}
+            {% for d in range(1, days_in_month + 1) %}<th data-day="{{ d }}">{{ d }}</th>{% endfor %}
             <th>Н</th><th>Ср. балл</th><th>Статус</th>
           </tr>
         </thead>
@@ -104,10 +119,10 @@
             <td class="sticky-col"><strong>{{ st.name }}</strong></td>
             {% for d in range(1, days_in_month + 1) %}
               {% set key = (st.id, d) %}
-              <td>
-                <input name="cell_{{ st.id }}_{{ d }}" class="input-field journal-cell" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5" maxlength="3" data-row="{{ row_index }}" data-col="{{ d }}">
+              <td data-day="{{ d }}">
+                <input name="cell_{{ st.id }}_{{ d }}" class="input-field journal-cell" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5" maxlength="3" data-row="{{ row_index }}" data-col="{{ d }}" data-student-name="{{ st.name }}" data-day="{{ d }}">
                 <input name="comment_{{ st.id }}_{{ d }}" class="input-field journal-comment journal-comment-input" value="{{ journal_comments.get(key, '') }}" placeholder="комментарий" data-row="{{ row_index }}" data-col="{{ d }}">
-                <button type="button" class="journal-comment-open" data-comment-name="comment_{{ st.id }}_{{ d }}" aria-label="Открыть комментарий">✎</button>
+                <button type="button" class="journal-comment-open" data-comment-name="comment_{{ st.id }}_{{ d }}" data-grade-name="cell_{{ st.id }}_{{ d }}" aria-label="Открыть урок">✎</button>
               </td>
             {% endfor %}
             <td>{{ journal_status.get(st.id, {}).get('n_count', 0) }}</td>
@@ -128,11 +143,23 @@
   {% endif %}
 </section>
 <div id="commentModal" class="comment-modal hidden" aria-hidden="true">
-  <div class="comment-modal-card">
-    <h3>Комментарий к ячейке</h3>
-    <p class="muted-text">Напишите полный комментарий — он сохранится вместе с журналом.</p>
-    <textarea id="commentModalText" class="input-field comment-modal-text" rows="7" placeholder="Комментарий, тема урока, пояснение..."></textarea>
+  <div class="comment-modal-card lesson-modal-card">
+    <h3>Урок, оценка и комментарий</h3>
+    <p id="commentModalMeta" class="muted-text">Выберите оценку/Н и добавьте тему урока или комментарий.</p>
+    <div class="lesson-modal-grid">
+      <div>
+        <label class="field-label" for="commentModalGrade">Оценка / Н</label>
+        <input id="commentModalGrade" class="input-field" maxlength="3" placeholder="5 или Н">
+      </div>
+      <div>
+        <label class="field-label">Подсказка</label>
+        <p class="muted-text">Для нескольких оценок в этот же день используйте блок «Быстрая оценка за отдельный урок» ниже.</p>
+      </div>
+    </div>
+    <label class="field-label" for="commentModalText">Тема урока / комментарий</label>
+    <textarea id="commentModalText" class="input-field comment-modal-text" rows="7" placeholder="Тема урока, комментарий, причина Н, уточнение..."></textarea>
     <div class="comment-modal-actions">
+      <button type="button" class="btn secondary-btn" id="commentModalClear">Очистить ячейку</button>
       <button type="button" class="btn secondary-btn" id="commentModalCancel">Отмена</button>
       <button type="button" class="btn" id="commentModalSave">Сохранить</button>
     </div>
@@ -267,6 +294,9 @@
   const undoJournalBtn = document.getElementById('undoJournalBtn');
   const redoJournalBtn = document.getElementById('redoJournalBtn');
   const dirtyCounter = document.getElementById('journalDirtyCounter');
+  const visibleDaysInput = document.getElementById('visibleDaysInput');
+  const applyVisibleDaysBtn = document.getElementById('applyVisibleDaysBtn');
+  const showAllDaysBtn = document.getElementById('showAllDaysBtn');
   const changedInput = document.getElementById('journalChangedFields');
   const partialSaveInput = document.getElementById('journalPartialSave');
   const originalValues = new Map(journalInputs.map((input) => [input.name, input.value]));
@@ -411,6 +441,30 @@
   if (nameFilter) nameFilter.addEventListener('input', applyFilter);
   if (riskOnly) riskOnly.addEventListener('change', applyFilter);
 
+  const setVisibleDays = (days) => {
+    const allowed = new Set(days);
+    const showAll = allowed.size === 0;
+    table.querySelectorAll('[data-day]').forEach((node) => {
+      const day = parseInt(node.dataset.day || '0', 10);
+      node.classList.toggle('journal-day-hidden', !showAll && !allowed.has(day));
+    });
+  };
+
+  applyVisibleDaysBtn?.addEventListener('click', () => {
+    const days = (visibleDaysInput?.value || '')
+      .split(/[ ,;]+/)
+      .map((value) => parseInt(value, 10))
+      .filter((value) => Number.isFinite(value) && value >= 1 && value <= 31);
+    setVisibleDays(days);
+    showToast(days.length ? `Показаны даты: ${days.join(', ')}` : 'Показаны все даты');
+  });
+
+  showAllDaysBtn?.addEventListener('click', () => {
+    if (visibleDaysInput) visibleDaysInput.value = '';
+    setVisibleDays([]);
+    showToast('Показаны все даты');
+  });
+
   document.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
@@ -482,24 +536,34 @@
 
   const commentModal = document.getElementById('commentModal');
   const commentModalText = document.getElementById('commentModalText');
+  const commentModalGrade = document.getElementById('commentModalGrade');
+  const commentModalMeta = document.getElementById('commentModalMeta');
   const commentModalSave = document.getElementById('commentModalSave');
   const commentModalCancel = document.getElementById('commentModalCancel');
+  const commentModalClear = document.getElementById('commentModalClear');
   let activeCommentInput = null;
+  let activeGradeInput = null;
 
   const closeCommentModal = () => {
     commentModal?.classList.add('hidden');
     commentModal?.setAttribute('aria-hidden', 'true');
     activeCommentInput = null;
+    activeGradeInput = null;
   };
 
   document.querySelectorAll('.journal-comment-open').forEach((button) => {
     button.addEventListener('click', () => {
       activeCommentInput = document.querySelector(`[name="${button.dataset.commentName}"]`);
-      if (!activeCommentInput || !commentModal || !commentModalText) return;
+      activeGradeInput = document.querySelector(`[name="${button.dataset.gradeName}"]`);
+      if (!activeCommentInput || !activeGradeInput || !commentModal || !commentModalText || !commentModalGrade) return;
       commentModalText.value = activeCommentInput.value || '';
+      commentModalGrade.value = activeGradeInput.value || '';
+      if (commentModalMeta) {
+        commentModalMeta.textContent = `${activeGradeInput.dataset.studentName || 'Студент'} · день ${activeGradeInput.dataset.day || ''}`;
+      }
       commentModal.classList.remove('hidden');
       commentModal.setAttribute('aria-hidden', 'false');
-      commentModalText.focus();
+      commentModalGrade.focus();
     });
   });
 
@@ -507,11 +571,16 @@
   commentModal?.addEventListener('click', (event) => {
     if (event.target === commentModal) closeCommentModal();
   });
+  commentModalClear?.addEventListener('click', () => {
+    if (activeGradeInput) setInputValue(activeGradeInput, '');
+    if (activeCommentInput) setInputValue(activeCommentInput, '');
+    saveDraft();
+    closeCommentModal();
+  });
   commentModalSave?.addEventListener('click', () => {
-    if (activeCommentInput && commentModalText) {
-      setInputValue(activeCommentInput, commentModalText.value);
-      saveDraft();
-    }
+    if (activeGradeInput && commentModalGrade) setInputValue(activeGradeInput, commentModalGrade.value.trim());
+    if (activeCommentInput && commentModalText) setInputValue(activeCommentInput, commentModalText.value);
+    saveDraft();
     closeCommentModal();
   });
 

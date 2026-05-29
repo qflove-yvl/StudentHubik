@@ -12,10 +12,22 @@
 <h1 class="page-title">Админ-панель</h1>
 {% if not can_manage_safe %}<p class="muted-text" style="margin-bottom:12px;">Режим куратора: доступ только для просмотра.</p>{% endif %}
 
-<div class="dashboard-actions">
+<div class="dashboard-actions admin-sticky-actions">
     <a href="{{ url_for('export_all_users') }}" class="btn">Экспорт всех пользователей (CSV)</a>
     {% if can_manage_safe %}<a href="{{ url_for('admin_backup_db') }}" class="btn" style="margin-left:8px;">Скачать бэкап БД</a>{% endif %}
+    <button id="adminCollapseAll" type="button" class="btn secondary-btn">Свернуть разделы</button>
+    <button id="adminExpandAll" type="button" class="btn secondary-btn">Раскрыть всё</button>
 </div>
+
+<section class="card admin-guide-card" style="margin-bottom:18px;">
+    <h2 style="margin-bottom:10px;">Что где находится</h2>
+    <div class="admin-guide-grid">
+        <div><strong>Кураторы</strong><span>Назначаются отдельным блоком ниже: выберите преподавателя + группу и нажмите «Назначить».</span></div>
+        <div><strong>Студенты</strong><span>Можно менять ФИО, email, группу, контакт, пароль и удалять аккаунт.</span></div>
+        <div><strong>Преподаватели</strong><span>Можно менять данные, пароль, кураторскую группу и предметы.</span></div>
+        <div><strong>Разделы</strong><span>Каждый большой блок сворачивается, чтобы админ-панель не превращалась в бесконечную простыню.</span></div>
+    </div>
+</section>
 
 {% if total_pages_safe > 1 %}<div class="pager" style="margin-bottom:12px;">{% for p in range(1, total_pages_safe + 1) %}<a class="pager-link{% if p == page_safe %} active{% endif %}" href="{{ url_for('admin_dashboard', q=query_safe, role=role_filter_safe, status=status_filter_safe, group_id=group_filter_safe, page=p) }}">{{ p }}</a>{% endfor %}</div>{% endif %}
 
@@ -93,6 +105,38 @@
     <div class="card"><div class="card-title">Всего пользователей</div><div class="card-value">{{ total_users_count|default(0) }}</div></div>
     <div class="card"><div class="card-title">Процент одобрения</div><div class="card-value">{{ approval_rate|default(0) }}%</div></div>
 </div>
+
+<section class="card curator-admin-card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:10px;">Назначение кураторов групп</h2>
+    <p class="muted-text" style="margin-bottom:12px;">Куратор — это преподаватель, который видит ведомость всей своей группы по всем предметам и скачивает отчёты за месяц/семестр.</p>
+    {% if can_manage_safe %}
+    <form method="POST" action="{{ url_for('admin_assign_curator') }}" class="admin-curator-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div>
+            <label class="field-label">1. Преподаватель</label>
+            <select name="teacher_id" class="input-field" required>
+                {% for teacher in all_approved_teachers %}<option value="{{ teacher.id }}">{{ teacher.name }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="field-label">2. Группа</label>
+            <select name="group_id" class="input-field" required>
+                {% for group in all_groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}
+            </select>
+        </div>
+        <button class="btn" type="submit">Назначить куратора</button>
+    </form>
+    {% endif %}
+    {% if curator_assignments %}
+    <div class="table-wrap" style="margin-top:12px;">
+        <table class="grade-table solid-table">
+            <thead><tr><th>Куратор</th><th>Группа</th><th>Студентов</th></tr></thead>
+            <tbody>{% for item in curator_assignments %}<tr><td>{{ item.teacher.name }}</td><td>{{ item.group_name }}</td><td>{{ item.student_count }}</td></tr>{% endfor %}</tbody>
+        </table>
+    </div>
+    {% else %}<p class="muted-text" style="margin-top:10px;">Кураторы пока не назначены.</p>{% endif %}
+</section>
+
 <section class="card" style="margin-bottom:24px;">
     <h2 style="margin-bottom:10px;">Шкала модерации</h2>
     <div class="student-rating-scale" aria-label="Шкала процента одобренных пользователей">
@@ -268,6 +312,11 @@
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                 <button class="btn" type="submit">Сохранить</button>
                             </form>
+                            <form method="POST" action="{{ url_for('admin_reset_user_password', user_id=student.id) }}" class="admin-password-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <input type="text" name="new_password" class="input-field admin-inline-input" placeholder="Новый пароль" minlength="6" required>
+                                <button class="btn secondary-btn" type="submit">Сменить пароль</button>
+                            </form>
                             <form method="POST" action="{{ url_for('admin_delete_student', user_id=student.id) }}" style="display:inline-block;margin-left:6px;">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                 <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>
@@ -329,6 +378,11 @@
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button class="btn" type="submit">Сохранить</button>
                         </form>
+                        <form method="POST" action="{{ url_for('admin_reset_user_password', user_id=teacher.id) }}" class="admin-password-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="text" name="new_password" class="input-field admin-inline-input" placeholder="Новый пароль" minlength="6" required>
+                            <button class="btn secondary-btn" type="submit">Сменить пароль</button>
+                        </form>
                     </td>
                 </tr>
             {% endfor %}
@@ -353,6 +407,47 @@ function toggleAll(masterId, itemsSelector) {
 
 toggleAll('select-all-students', '.pending-student-checkbox');
 toggleAll('select-all-teachers', '.pending-teacher-checkbox');
+
+(function () {
+    const sections = Array.from(document.querySelectorAll('section.card'));
+    sections.forEach((section, index) => {
+        const title = section.querySelector('h2');
+        if (!title) return;
+        section.classList.add('admin-collapsible-card');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'admin-section-toggle';
+        button.textContent = 'Свернуть';
+        title.appendChild(button);
+        const saved = localStorage.getItem(`admin_section_${index}`);
+        if (saved === 'closed') {
+            section.classList.add('collapsed');
+            button.textContent = 'Раскрыть';
+        }
+        button.addEventListener('click', () => {
+            const collapsed = section.classList.toggle('collapsed');
+            button.textContent = collapsed ? 'Раскрыть' : 'Свернуть';
+            localStorage.setItem(`admin_section_${index}`, collapsed ? 'closed' : 'open');
+        });
+    });
+
+    document.getElementById('adminCollapseAll')?.addEventListener('click', () => {
+        sections.forEach((section, index) => {
+            section.classList.add('collapsed');
+            const button = section.querySelector('.admin-section-toggle');
+            if (button) button.textContent = 'Раскрыть';
+            localStorage.setItem(`admin_section_${index}`, 'closed');
+        });
+    });
+    document.getElementById('adminExpandAll')?.addEventListener('click', () => {
+        sections.forEach((section, index) => {
+            section.classList.remove('collapsed');
+            const button = section.querySelector('.admin-section-toggle');
+            if (button) button.textContent = 'Свернуть';
+            localStorage.setItem(`admin_section_${index}`, 'open');
+        });
+    });
+})();
 </script>
 
 {% endblock %}

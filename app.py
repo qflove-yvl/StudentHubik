@@ -2109,6 +2109,17 @@ def teacher_dashboard():
 
     curator_group_name = groups_by_id.get(current_user.group_id, '') if current_user.group_id else ''
     curator_student_count = User.query.filter_by(role='student', is_verified=True, group_id=current_user.group_id).count() if current_user.group_id else 0
+    curator_recent_grades = []
+    if current_user.group_id:
+        curator_student_ids = [row[0] for row in db.session.query(User.id).filter_by(role='student', is_verified=True, group_id=current_user.group_id).all()]
+        if curator_student_ids:
+            curator_recent_grades = (
+                Grade.query.join(Subject).join(User, User.id == Grade.student_id)
+                .filter(Grade.student_id.in_(curator_student_ids))
+                .order_by(Grade.graded_at.desc(), Grade.id.desc())
+                .limit(80)
+                .all()
+            )
 
     return render_template(
         'teacher_dashboard.html',
@@ -2138,6 +2149,7 @@ def teacher_dashboard():
         journal_summary=journal_summary,
         curator_group_name=curator_group_name,
         curator_student_count=curator_student_count,
+        curator_recent_grades=curator_recent_grades,
     )
 
 
@@ -2255,6 +2267,7 @@ def admin_dashboard():
 
     approved_teachers = [u for u in filtered_users if u.role == 'teacher' and u.is_verified]
     approved_students = [u for u in filtered_users if u.role == 'student' and u.is_verified]
+    all_approved_teachers = User.query.filter_by(role='teacher', is_verified=True).order_by(User.name).all()
     total_pages = max(1, (total_filtered + per_page - 1) // per_page)
 
     all_groups = Group.query.order_by(Group.name).all()
@@ -2271,11 +2284,21 @@ def admin_dashboard():
         active_schedule_groups = [row[0] for row in db.session.query(ScheduleLesson.group_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.group_name).all()]
         active_schedule_sheets = [row[0] for row in db.session.query(ScheduleLesson.sheet_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.sheet_name).all()]
 
+    curator_assignments = [
+        {
+            'teacher': teacher,
+            'group_name': groups_by_id.get(teacher.group_id, '—'),
+            'student_count': User.query.filter_by(role='student', is_verified=True, group_id=teacher.group_id).count() if teacher.group_id else 0
+        }
+        for teacher in all_approved_teachers if teacher.group_id
+    ]
+
     return render_template(
         'admin_dashboard.html',
         pending_teachers=pending_teachers,
         pending_students=pending_students,
         approved_teachers=approved_teachers,
+        all_approved_teachers=all_approved_teachers,
         approved_students=approved_students,
         groups_by_id={group.id: group.name for group in all_groups},
         query=query,
@@ -2295,7 +2318,8 @@ def admin_dashboard():
         total_filtered=total_filtered,
         total_users_count=total_users_count,
         verified_users_count=verified_users_count,
-        approval_rate=approval_rate
+        approval_rate=approval_rate,
+        curator_assignments=curator_assignments
     )
 
 
@@ -2445,6 +2469,49 @@ def reject_user(user_id):
     log_audit('reject_user', f'id={user_id}')
     flash('Заявка отклонена и аккаунт удалён')
     return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/curator/assign', methods=['POST'])
+@login_required
+def admin_assign_curator():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    teacher_id = request.form.get('teacher_id', type=int)
+    group_id = request.form.get('group_id', type=int)
+    teacher = User.query.filter_by(id=teacher_id, role='teacher', is_verified=True).first()
+    group = Group.query.get(group_id) if group_id else None
+    if not teacher or not group:
+        flash('Выберите преподавателя и группу для назначения куратора')
+        return redirect(url_for('admin_dashboard', status='approved', role='teacher'))
+
+    teacher.group_id = group.id
+    db.session.commit()
+    log_audit('assign_curator', f'teacher={teacher.id}, group={group.name}')
+    flash(f'{teacher.name} назначен куратором группы {group.name}')
+    return redirect(url_for('admin_dashboard', status='approved', role='teacher'))
+
+
+@app.route('/admin/user/<int:user_id>/password', methods=['POST'])
+@login_required
+def admin_reset_user_password(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    user = User.query.filter(User.id == user_id, User.role.in_(['student', 'teacher'])).first()
+    new_password = request.form.get('new_password', '')
+    if not user:
+        flash('Пользователь не найден')
+        return redirect(url_for('admin_dashboard', status='approved'))
+    if len(new_password) < 6:
+        flash('Новый пароль должен быть не короче 6 символов')
+        return redirect(url_for('admin_dashboard', status='approved', role=user.role))
+
+    user.password = generate_password_hash(new_password)
+    db.session.commit()
+    log_audit('admin_reset_password', f'user={user.id}, role={user.role}')
+    flash(f'Пароль пользователя {user.name} обновлён')
+    return redirect(url_for('admin_dashboard', status='approved', role=user.role))
 
 
 @app.route('/admin/user/<int:user_id>/update', methods=['POST'])
