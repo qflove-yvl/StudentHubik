@@ -929,3 +929,103 @@ html[data-theme="light"] .journal-table .sticky-col {
     .admin-curator-form,
     .lesson-modal-grid { grid-template-columns: 1fr; }
 }
+
+/* Stability cockpit and premium journal refinements */
+.section-heading-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.student-risk-card,
+.group-risk-card {
+    background: linear-gradient(135deg, rgba(37,99,235,.12), rgba(34,211,238,.08)), var(--surface-strong);
+}
+
+.risk-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 104px;
+    padding: 7px 11px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 900;
+    border: 1px solid var(--border);
+    background: var(--surface-strong);
+}
+
+.risk-good { color: #22c55e; }
+.risk-watch { color: #f59e0b; }
+.risk-danger { color: #ef4444; }
+
+.risk-score-bar {
+    height: 13px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(148,163,184,.20);
+    border: 1px solid var(--border);
+    margin-top: 12px;
+}
+
+.compact-risk { width: 130px; margin-top: 0; height: 10px; }
+.risk-score-fill { height: 100%; border-radius: inherit; transition: width .25s ease; }
+.risk-score-fill.risk-good { background: linear-gradient(90deg, #22c55e, #14b8a6); }
+.risk-score-fill.risk-watch { background: linear-gradient(90deg, #fbbf24, #f97316); }
+.risk-score-fill.risk-danger { background: linear-gradient(90deg, #fb7185, #ef4444); }
+
+.risk-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.risk-grid > div {
+    padding: 12px;
+    border-radius: 15px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,.06);
+}
+
+.risk-grid strong { display: block; font-size: 20px; }
+.risk-grid span { color: var(--muted); font-size: 13px; }
+.risk-reasons { margin: 12px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.55; }
+html[data-theme="light"] .risk-grid > div { background: rgba(255,255,255,.78); }
+
+.lesson-date-manager {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0;
+    padding: 14px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: linear-gradient(135deg, rgba(15,23,42,.20), rgba(37,99,235,.08)), var(--surface-strong);
+}
+
+.lesson-date-form {
+    display: grid;
+    grid-template-columns: 160px 150px minmax(220px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.lesson-date-form.compact-form { grid-template-columns: 160px auto; max-width: 330px; }
+.lesson-date-form .input-field { margin: 0; }
+.lesson-day-meta {
+    display: block;
+    max-width: 76px;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 9px;
+    line-height: 1.1;
+    white-space: normal;
+}
+
+@media (max-width: 980px) {
+    .lesson-date-form,
+    .lesson-date-form.compact-form { grid-template-columns: 1fr; max-width: none; }
+    .compact-risk { width: 100%; }
+}

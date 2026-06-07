@@ -94,6 +94,40 @@
     </div>
   </div>
 
+  {% if journal_subject and selected_group %}
+  <div class="lesson-date-manager">
+    <div>
+      <strong>Даты уроков</strong>
+      <p class="muted-text">Добавляйте реальные даты пар/уроков и скрывайте лишние столбцы — журнал станет компактнее и понятнее.</p>
+    </div>
+    <form method="POST" class="lesson-date-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="add_journal_date">
+      <input type="hidden" name="journal_group" value="{{ selected_group }}">
+      <input type="hidden" name="journal_subject_id" value="{{ journal_subject.id }}">
+      <input type="hidden" name="journal_month" value="{{ journal_month }}">
+      <input type="date" name="lesson_date" class="input-field" required>
+      <select name="lesson_type" class="input-field">
+        <option value="Урок">Урок</option>
+        <option value="Пара">Пара</option>
+        <option value="Практика">Практика</option>
+        <option value="Контрольная">Контрольная</option>
+      </select>
+      <input name="topic" class="input-field" placeholder="Тема урока / пары">
+      <button class="btn" type="submit">Сохранить дату</button>
+    </form>
+    <form method="POST" class="lesson-date-form compact-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="hide_journal_date">
+      <input type="hidden" name="journal_group" value="{{ selected_group }}">
+      <input type="hidden" name="journal_subject_id" value="{{ journal_subject.id }}">
+      <input type="hidden" name="journal_month" value="{{ journal_month }}">
+      <input type="date" name="lesson_date" class="input-field" required>
+      <button class="btn secondary-btn" type="submit">Убрать дату</button>
+    </form>
+  </div>
+  {% endif %}
+
   {% if journal_students and journal_subject %}
   <form method="POST" id="journalForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -109,7 +143,7 @@
         <thead>
           <tr>
             <th class="sticky-col sticky-head">ФИО</th>
-            {% for d in range(1, days_in_month + 1) %}<th data-day="{{ d }}">{{ d }}</th>{% endfor %}
+            {% for d in range(1, days_in_month + 1) %}<th data-day="{{ d }}" class="{% if d in hidden_journal_days|default([]) %}journal-day-hidden{% endif %}">{{ d }}{% if lesson_days_meta|default({}).get(d) %}<small class="lesson-day-meta">{{ lesson_days_meta.get(d).type }}{% if lesson_days_meta.get(d).topic %} · {{ lesson_days_meta.get(d).topic }}{% endif %}</small>{% endif %}</th>{% endfor %}
             <th>Н</th><th>Ср. балл</th><th>Статус</th>
           </tr>
         </thead>
@@ -120,7 +154,7 @@
             <td class="sticky-col"><strong>{{ st.name }}</strong></td>
             {% for d in range(1, days_in_month + 1) %}
               {% set key = (st.id, d) %}
-              <td data-day="{{ d }}">
+              <td data-day="{{ d }}" class="{% if d in hidden_journal_days|default([]) %}journal-day-hidden{% endif %}">
                 <input name="cell_{{ st.id }}_{{ d }}" class="input-field journal-cell" value="{{ journal_entries.get(key, '') }}" placeholder="Н/5" maxlength="3" data-row="{{ row_index }}" data-col="{{ d }}" data-student-name="{{ st.name }}" data-day="{{ d }}">
                 <input name="comment_{{ st.id }}_{{ d }}" class="input-field journal-comment journal-comment-input" value="{{ journal_comments.get(key, '') }}" placeholder="комментарий" data-row="{{ row_index }}" data-col="{{ d }}">
                 <button type="button" class="journal-comment-open" data-comment-name="comment_{{ st.id }}_{{ d }}" data-grade-name="cell_{{ st.id }}_{{ d }}" aria-label="Открыть урок">✎</button>

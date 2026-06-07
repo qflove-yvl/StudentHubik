@@ -139,6 +139,21 @@ class Grade(db.Model):
     student = db.relationship('User', foreign_keys=[student_id])
     subject = db.relationship('Subject')
 
+class JournalLessonDate(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
+    group_name = db.Column(db.String(60), nullable=False)
+    lesson_date = db.Column(db.DateTime, nullable=False)
+    lesson_type = db.Column(db.String(40), default='Урок')
+    topic = db.Column(db.String(200), default='')
+    is_hidden = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    teacher = db.relationship('User', foreign_keys=[teacher_id])
+    subject = db.relationship('Subject')
+
+
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     actor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -846,6 +861,102 @@ def build_schedule_view(lessons):
     return grouped
 
 
+def build_student_risk_profile(grades):
+    """Return a defensive, template-friendly learning risk snapshot."""
+    numeric = [item.grade for item in grades if isinstance(getattr(item, 'grade', None), (int, float))]
+    absences = sum(1 for item in grades if (getattr(item, 'mark', '') or '').upper() == 'Н')
+    recent_numeric = [item.grade for item in sorted(grades, key=lambda g: (g.graded_at or datetime.min, g.id))[-5:] if isinstance(getattr(item, 'grade', None), (int, float))]
+    avg_value = round(sum(numeric) / len(numeric), 2) if numeric else 0
+
+    score = 0
+    reasons = []
+    if numeric and avg_value < 3:
+        score += 45
+        reasons.append('Средний балл ниже 3 — лучше быстро разобрать сложные темы с преподавателем.')
+    elif numeric and avg_value < 3.7:
+        score += 25
+        reasons.append('Средний балл можно подтянуть: выбери 1–2 предмета для фокуса на неделю.')
+
+    if absences >= 5:
+        score += 35
+        reasons.append(f'Много пропусков: {absences} отметок Н.')
+    elif absences:
+        score += min(20, absences * 4)
+        reasons.append(f'Есть пропуски: {absences} отметок Н.')
+
+    if len(recent_numeric) >= 3 and recent_numeric[-1] < recent_numeric[0]:
+        score += 15
+        reasons.append('Последние оценки ниже первых в недавнем периоде — виден риск регресса.')
+
+    score = min(100, score)
+    if score >= 60:
+        level, tone = 'Высокий риск', 'danger'
+    elif score >= 25:
+        level, tone = 'Нужен контроль', 'watch'
+    else:
+        level, tone = 'Низкий риск', 'good'
+
+    return {
+        'score': score,
+        'risk_score': score,
+        'level': level,
+        'risk_level': level,
+        'tone': tone,
+        'reasons': reasons,
+        'avg': avg_value,
+        'absences': absences,
+    }
+
+
+def build_group_risk_rows(groups, students, grades):
+    """Build an admin cockpit without assuming every grade row is complete."""
+    groups_by_id = {group.id: group for group in groups}
+    students_by_group = {}
+    for student in students:
+        if student.group_id:
+            students_by_group.setdefault(student.group_id, []).append(student)
+
+    grades_by_student = {}
+    for item in grades:
+        if item.student_id:
+            grades_by_student.setdefault(item.student_id, []).append(item)
+
+    rows = []
+    for group_id, group_students in sorted(students_by_group.items(), key=lambda pair: groups_by_id.get(pair[0], Group()).name if groups_by_id.get(pair[0]) else ''):
+        group = groups_by_id.get(group_id)
+        group_grades = [grade for student in group_students for grade in grades_by_student.get(student.id, [])]
+        numeric = [grade.grade for grade in group_grades if isinstance(getattr(grade, 'grade', None), (int, float))]
+        absences = sum(1 for grade in group_grades if (getattr(grade, 'mark', '') or '').upper() == 'Н')
+        avg_value = round(sum(numeric) / len(numeric), 2) if numeric else 0
+        critical_count = 0
+        attention_count = 0
+        for student in group_students:
+            profile = build_student_risk_profile(grades_by_student.get(student.id, []))
+            if profile['tone'] == 'danger':
+                critical_count += 1
+            elif profile['tone'] == 'watch':
+                attention_count += 1
+        risk_score = min(100, critical_count * 28 + attention_count * 12 + min(absences * 2, 28) + (20 if numeric and avg_value < 3.4 else 0))
+        if risk_score >= 60:
+            risk_level, tone = 'Срочно', 'danger'
+        elif risk_score >= 25:
+            risk_level, tone = 'Контроль', 'watch'
+        else:
+            risk_level, tone = 'Норма', 'good'
+        rows.append({
+            'group_name': group.name if group else 'Без группы',
+            'student_count': len(group_students),
+            'avg': avg_value,
+            'absences': absences,
+            'critical_count': critical_count,
+            'attention_count': attention_count,
+            'risk_score': risk_score,
+            'risk_level': risk_level,
+            'tone': tone,
+        })
+
+    return sorted(rows, key=lambda row: row['risk_score'], reverse=True)
+
 def apply_period_filter(query, period_value):
     now = datetime.utcnow()
     if period_value == 'week':
@@ -927,7 +1038,11 @@ def inject_template_security():
 
     unread_notifications = 0
     if current_user.is_authenticated:
-        unread_notifications = get_unread_notifications_count(current_user.id)
+        try:
+            unread_notifications = get_unread_notifications_count(current_user.id)
+        except Exception as error:
+            app.logger.warning('unread_notifications_failed user=%s reason=%s', current_user.id, error)
+            unread_notifications = 0
 
     return {
         'csrf_token': get_or_create_csrf_token(),
@@ -1774,12 +1889,8 @@ def student_dashboard():
         grade for grade in grades
         if grade.graded_at and grade.graded_at >= datetime.utcnow() - timedelta(days=7)
     ])
-    risk_level = 'Низкий риск'
-    if isinstance(average_grade, (int, float)):
-        if average_grade < 3.2:
-            risk_level = 'Зона риска'
-        elif average_grade < 4:
-            risk_level = 'Нужно подтянуть'
+    risk_profile = build_student_risk_profile(grades)
+    risk_level = risk_profile['risk_level']
 
     progress_points = build_student_progress_points(grades)
     progress_delta = 0
@@ -1826,6 +1937,7 @@ def student_dashboard():
         progress_points=progress_points,
         new_grades_count=new_grades_count,
         risk_level=risk_level,
+        risk_profile=risk_profile,
         progress_delta=progress_delta,
         progress_trend=progress_trend,
         page=page,
@@ -1981,6 +2093,64 @@ def teacher_dashboard():
             log_audit('delete_grade', f'grade_id={grade_id}')
             flash('Отметка удалена')
             return redirect(url_for('teacher_dashboard'))
+
+        if action in {'add_journal_date', 'hide_journal_date'}:
+            group_name = normalize_cell_value(request.form.get('journal_group', '')).upper()
+            subject_id = request.form.get('journal_subject_id', type=int)
+            lesson_date_raw = request.form.get('lesson_date', '').strip()
+            subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
+            if not group_name or not subject or not lesson_date_raw:
+                flash('Выберите группу, предмет и дату урока')
+                return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=journal_month_raw))
+            try:
+                lesson_date = datetime.strptime(lesson_date_raw, '%Y-%m-%d')
+            except ValueError:
+                flash('Дата урока указана неверно')
+                return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=journal_month_raw))
+
+            existing_date = JournalLessonDate.query.filter_by(
+                teacher_id=current_user.id,
+                subject_id=subject.id,
+                group_name=group_name,
+                lesson_date=lesson_date
+            ).first()
+
+            if action == 'hide_journal_date':
+                if existing_date:
+                    existing_date.is_hidden = True
+                else:
+                    db.session.add(JournalLessonDate(
+                        teacher_id=current_user.id,
+                        subject_id=subject.id,
+                        group_name=group_name,
+                        lesson_date=lesson_date,
+                        lesson_type='Скрыта',
+                        topic='',
+                        is_hidden=True
+                    ))
+                db.session.commit()
+                flash('Дата скрыта из журнала')
+                return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=lesson_date.strftime('%Y-%m')))
+
+            lesson_type = request.form.get('lesson_type', 'Урок').strip()[:40] or 'Урок'
+            topic = request.form.get('topic', '').strip()[:200]
+            if existing_date:
+                existing_date.lesson_type = lesson_type
+                existing_date.topic = topic
+                existing_date.is_hidden = False
+            else:
+                db.session.add(JournalLessonDate(
+                    teacher_id=current_user.id,
+                    subject_id=subject.id,
+                    group_name=group_name,
+                    lesson_date=lesson_date,
+                    lesson_type=lesson_type,
+                    topic=topic,
+                    is_hidden=False
+                ))
+            db.session.commit()
+            flash('Дата урока добавлена в журнал')
+            return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=lesson_date.strftime('%Y-%m')))
 
         if action == 'save_journal_month':
             group_name = normalize_cell_value(request.form.get('journal_group', '')).upper()
@@ -2164,6 +2334,23 @@ def teacher_dashboard():
             'fill_rate': round((filled_cells / total_cells) * 100, 1) if total_cells else 0,
         }
 
+    journal_lesson_dates = []
+    hidden_journal_days = []
+    lesson_days_meta = {}
+    if journal_subject and selected_group:
+        journal_lesson_dates = JournalLessonDate.query.filter(
+            JournalLessonDate.teacher_id == current_user.id,
+            JournalLessonDate.subject_id == journal_subject.id,
+            JournalLessonDate.group_name == selected_group,
+            JournalLessonDate.lesson_date >= month_start,
+            JournalLessonDate.lesson_date < month_end
+        ).order_by(JournalLessonDate.lesson_date.asc()).all()
+        hidden_journal_days = [item.lesson_date.day for item in journal_lesson_dates if item.is_hidden]
+        lesson_days_meta = {
+            item.lesson_date.day: {'type': item.lesson_type or 'Урок', 'topic': item.topic or '', 'hidden': item.is_hidden}
+            for item in journal_lesson_dates
+        }
+
     curator_group_name = groups_by_id.get(current_user.group_id, '') if current_user.group_id else ''
     curator_student_count = User.query.filter_by(role='student', is_verified=True, group_id=current_user.group_id).count() if current_user.group_id else 0
     curator_recent_grades = []
@@ -2204,6 +2391,9 @@ def teacher_dashboard():
         journal_comments=journal_comments,
         journal_status=journal_status,
         journal_summary=journal_summary,
+        journal_lesson_dates=journal_lesson_dates,
+        hidden_journal_days=hidden_journal_days,
+        lesson_days_meta=lesson_days_meta,
         curator_group_name=curator_group_name,
         curator_student_count=curator_student_count,
         curator_recent_grades=curator_recent_grades,
@@ -2237,10 +2427,44 @@ def export_curator_report():
             .all()
         )
 
+    students_by_id = {student.id: student.name for student in students_in_group}
+    curator_group = Group.query.get(current_user.group_id)
+    group_name = curator_group.name if curator_group else 'group'
+
+    if openpyxl:
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = 'Ведомость'
+        sheet.append(['Группа', group_name, 'Период', title])
+        sheet.append([])
+        sheet.append(['Студент', 'Предмет', 'Оценка/Н', 'Семестр', 'Комментарий', 'Дата'])
+        for cell in sheet[3]:
+            cell.font = openpyxl.styles.Font(bold=True, color='FFFFFF')
+            cell.fill = openpyxl.styles.PatternFill('solid', fgColor='2563EB')
+        for item in grades:
+            sheet.append([
+                students_by_id.get(item.student_id, '—'),
+                item.subject.name if item.subject else '—',
+                item.mark or item.grade or '',
+                item.semester,
+                item.comment or '',
+                item.graded_at.strftime('%d.%m.%Y') if item.graded_at else ''
+            ])
+        widths = [34, 26, 12, 10, 42, 14]
+        for index, width in enumerate(widths, start=1):
+            sheet.column_dimensions[openpyxl.utils.get_column_letter(index)].width = width
+        output = io.BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        return Response(
+            output.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={'Content-Disposition': f'attachment; filename=curator_{group_name}_{title}.xlsx'}
+        )
+
     stream = io.StringIO()
     writer = csv.writer(stream)
     writer.writerow(['student', 'subject', 'grade_or_mark', 'semester', 'comment', 'graded_at'])
-    students_by_id = {student.id: student.name for student in students_in_group}
     for item in grades:
         writer.writerow([
             students_by_id.get(item.student_id, '—'),
@@ -2251,8 +2475,6 @@ def export_curator_report():
             item.graded_at.isoformat() if item.graded_at else ''
         ])
 
-    curator_group = Group.query.get(current_user.group_id)
-    group_name = curator_group.name if curator_group else 'group'
     return Response(
         '\ufeff' + stream.getvalue(),
         mimetype='text/csv; charset=utf-8',
@@ -2341,6 +2563,10 @@ def admin_dashboard():
         active_schedule_groups = [row[0] for row in db.session.query(ScheduleLesson.group_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.group_name).all()]
         active_schedule_sheets = [row[0] for row in db.session.query(ScheduleLesson.sheet_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.sheet_name).all()]
 
+    all_verified_students = User.query.filter_by(role='student', is_verified=True).all()
+    all_grade_rows = Grade.query.all()
+    group_risk_rows = build_group_risk_rows(all_groups, all_verified_students, all_grade_rows)
+
     curator_assignments = [
         {
             'teacher': teacher,
@@ -2376,7 +2602,8 @@ def admin_dashboard():
         total_users_count=total_users_count,
         verified_users_count=verified_users_count,
         approval_rate=approval_rate,
-        curator_assignments=curator_assignments
+        curator_assignments=curator_assignments,
+        group_risk_rows=group_risk_rows
     )
 
 

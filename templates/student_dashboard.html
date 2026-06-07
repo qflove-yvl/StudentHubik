@@ -28,6 +28,32 @@
     <div class="card"><div class="card-title">Тренд</div><div class="card-value">{{ progress_trend|default('Стабильно') }}</div></div>
 </div>
 
+{% set risk_profile_safe = risk_profile|default({'score': 0, 'level': risk_level|default('Низкий риск'), 'tone': 'good', 'reasons': []}) %}
+<section class="card list-card student-risk-card">
+    <div class="section-heading-row">
+        <div>
+            <h2>Навигатор успеваемости</h2>
+            <p class="muted-text">Система спокойно подсвечивает риски, чтобы мелкая проблема не превращалась в завал.</p>
+        </div>
+        <span class="risk-pill risk-{{ risk_profile_safe.tone }}">{{ risk_profile_safe.level }}</span>
+    </div>
+    <div class="risk-score-bar" aria-label="Индекс риска">
+        <div class="risk-score-fill risk-{{ risk_profile_safe.tone }}" style="width: {{ risk_profile_safe.score }}%;"></div>
+    </div>
+    <div class="risk-grid">
+        <div><strong>{{ risk_profile_safe.score }}%</strong><span>индекс внимания</span></div>
+        <div><strong>{{ progress_trend|default('Стабильно') }}</strong><span>динамика</span></div>
+        <div><strong>{{ new_grades_count|default(0) }}</strong><span>новых оценок за 7 дней</span></div>
+    </div>
+    {% if risk_profile_safe.reasons %}
+        <ul class="risk-reasons">
+            {% for reason in risk_profile_safe.reasons %}<li>{{ reason }}</li>{% endfor %}
+        </ul>
+    {% else %}
+        <p class="muted-text" style="margin-top:10px;">Критичных сигналов нет — продолжай в том же темпе.</p>
+    {% endif %}
+</section>
+
 <section class="card list-card student-grades">
     <h2>Динамика среднего балла</h2>
     {% if progress_points|default([]) %}
