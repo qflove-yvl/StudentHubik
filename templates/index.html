@@ -1,28 +1,46 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="max-width:900px;margin:auto;text-align:center;margin-top:80px;">
+<div style="max-width:950px;margin:auto;text-align:center;margin-top:40px;">
+
+    <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo home-main-logo" alt="StudentHubik">
 
     <h1 class="page-title">Добро пожаловать в StudentHubik</h1>
-    <p style="opacity:0.7;margin-bottom:50px;font-size:18px;">
-        Платформа управления обучением нового поколения
+    <p style="opacity:0.78;margin-bottom:42px;font-size:18px;">
+        Официальный цифровой журнал колледжа для студентов, преподавателей и администрации
     </p>
 
     <div class="card-grid">
         <div class="card">
             <div class="card-title">Я студент</div>
-            <div class="card-value">🎓</div>
+            <div class="card-value"><span class="role-sticker student-sticker"><span class="sticker-icon">📘</span></span></div>
             <br>
-            <a href="{{ url_for('login') }}?role=student" class="btn">Войти как студент</a>
+            <a href="{{ url_for('login', role='student') }}" class="btn">Войти как студент</a>
         </div>
 
         <div class="card">
             <div class="card-title">Я преподаватель</div>
-            <div class="card-value">👨‍🏫</div>
+            <div class="card-value"><span class="role-sticker teacher-sticker"><span class="sticker-icon">🧑‍🏫</span></span></div>
             <br>
-            <a href="{{ url_for('login') }}?role=teacher" class="btn">Войти как преподаватель</a>
+            <a href="{{ url_for('login', role='teacher') }}" class="btn">Войти как преподаватель</a>
         </div>
     </div>
+
+
+    <section class="card" style="margin-top:18px; text-align:left;">
+        <h2 style="margin-bottom:10px;">Почему это удобно</h2>
+        <div class="status-chip-grid">
+            <span class="status-chip">⚡ Быстрый вход и сброс пароля</span>
+            <span class="status-chip">📈 Наглядная статистика оценок</span>
+            <span class="status-chip">🛡️ Безопасность: CSRF + лимиты входа</span>
+            <span class="status-chip">📤 Экспорт в CSV за 1 клик</span>
+            <span class="status-chip">📱 Полностью адаптивный интерфейс</span>
+        </div>
+    </section>
+    <section class="card" style="margin-top:18px; text-align:left;">
+        <h2 style="margin-bottom:10px;">Регламент и официальный статус</h2>
+        <p class="muted-text">Сервис предназначен для учебного процесса {{ college_name }}: контроль оценок, расписания и коммуникации в едином интерфейсе.</p>
+    </section>
 
 </div>
 

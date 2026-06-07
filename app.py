@@ -1,59 +1,123 @@
-from flask import flash
-from flask import Flask, render_template, redirect, url_for, request
+from flask import abort, flash
+from flask import Flask, render_template, redirect, url_for, request, session, send_from_directory
+from flask import Response
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-import random
-from telegram import Bot
+from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
+import csv
+import io
 import os
+import re
+import secrets
+import shutil
+from datetime import datetime, timedelta
+import logging
+import smtplib
+from email.message import EmailMessage
+from logging.handlers import RotatingFileHandler
 
+from sqlalchemy import func, inspect, text
 
-TELEGRAM_TOKEN = "8356757725:AAHzphHvJ_mBGhSZYN8KrIL6RQ5axoatn7o"
-bot = Bot(token=TELEGRAM_TOKEN)
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+
+try:
+    import xlrd
+except ImportError:
+    xlrd = None
+
+try:
+    import sentry_sdk
+except ImportError:  # optional dependency in local dev
+    sentry_sdk = None
+
+def normalize_database_url(raw_url):
+    database_url = raw_url or 'sqlite:///site.db'
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    return database_url
 
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'super-secret-key'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+app.config['SQLALCHEMY_DATABASE_URI'] = normalize_database_url(os.getenv('DATABASE_URL'))
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL',
-    'sqlite:///site.db'
-)
-
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key')
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+app.config['ADMIN_EMAIL'] = os.getenv('ADMIN_EMAIL', 'admin@studenthubik.local').lower()
+app.config['ADMIN_PASSWORD'] = os.getenv('ADMIN_PASSWORD', 'admin12345')
+app.config['LOGIN_MAX_ATTEMPTS'] = int(os.getenv('LOGIN_MAX_ATTEMPTS', '5'))
+app.config['LOGIN_BLOCK_MINUTES'] = int(os.getenv('LOGIN_BLOCK_MINUTES', '10'))
+app.config['PASSWORD_RESET_TOKEN_MINUTES'] = int(os.getenv('PASSWORD_RESET_TOKEN_MINUTES', '30'))
+app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', '')
+app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', '587'))
+app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
+app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
+app.config['SMTP_FROM_EMAIL'] = os.getenv('SMTP_FROM_EMAIL', app.config['ADMIN_EMAIL'])
+app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', '1') == '1'
+app.config['SMTP_USE_SSL'] = os.getenv('SMTP_USE_SSL', '0') == '1'
+app.config['SMTP_TIMEOUT_SECONDS'] = int(os.getenv('SMTP_TIMEOUT_SECONDS', '15'))
+app.config['SENTRY_DSN'] = os.getenv('SENTRY_DSN', '')
+app.config['ENVIRONMENT'] = os.getenv('ENVIRONMENT', 'development')
+app.config['REQUIRE_STRONG_SECRET_IN_PROD'] = os.getenv('REQUIRE_STRONG_SECRET_IN_PROD', '0') == '1'
+app.config['PASSWORD_RESET_MIN_INTERVAL_SECONDS'] = int(os.getenv('PASSWORD_RESET_MIN_INTERVAL_SECONDS', '60'))
+app.config['DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL'] = os.getenv('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL', '1') == '1'
+app.config['SCHEDULE_UPLOAD_DIR'] = os.path.join(app.instance_path, 'schedules')
+app.config['MAX_SCHEDULE_HISTORY'] = int(os.getenv('MAX_SCHEDULE_HISTORY', '20'))
+app.config['COLLEGE_NAME'] = os.getenv('COLLEGE_NAME', 'Красноярский колледж отраслевых технологий и предпринимательства')
+app.config['SESSION_COOKIE_SAMESITE'] = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax')
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', '1') == '1' if os.getenv('ENVIRONMENT') == 'production' else False
+app.config['AVATAR_UPLOAD_DIR'] = os.path.join(app.root_path, 'static', 'avatars')
+app.config['AVATAR_ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
 
 
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
 
-# ====== МОДЕЛЬ ПОЛЬЗОВАТЕЛЯ ======
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(150), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
+    username = db.Column(db.String(50), unique=True)
     password = db.Column(db.String(200), nullable=False)
     role = db.Column(db.String(20), nullable=False)
     group_id = db.Column(db.Integer)
 
     is_verified = db.Column(db.Boolean, default=False)
     telegram = db.Column(db.String(100))
+    theme = db.Column(db.String(10), default='dark')
+    compact_mode = db.Column(db.Boolean, default=False)
+    animations_enabled = db.Column(db.Boolean, default=True)
+
 
 class VerificationCode(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     code = db.Column(db.String(6))
 
+
+class PasswordResetToken(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    token = db.Column(db.String(120), unique=True, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    is_used = db.Column(db.Boolean, default=False)
+
+    user = db.relationship('User')
+
+
 class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
 
 
-# ====== МОДЕЛЬ ПРЕДМЕТА ======
 class Subject(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -62,150 +126,2705 @@ class Subject(db.Model):
     teacher = db.relationship('User', backref='subjects')
 
 
-# ====== МОДЕЛЬ ОЦЕНКИ ======
 class Grade(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'))
     grade = db.Column(db.Integer)
+    mark = db.Column(db.String(5), default='')
+    comment = db.Column(db.String(300), default='')
+    semester = db.Column(db.Integer, nullable=False, default=1)
+    graded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     student = db.relationship('User', foreign_keys=[student_id])
     subject = db.relationship('Subject')
 
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    actor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    action = db.Column(db.String(120), nullable=False)
+    details = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    actor = db.relationship('User')
+
+
+class LoginAttempt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    identifier = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    fail_count = db.Column(db.Integer, nullable=False, default=0)
+    blocked_until = db.Column(db.DateTime, nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Notification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    title = db.Column(db.String(120), nullable=False)
+    message = db.Column(db.String(300), nullable=False)
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user = db.relationship('User')
+
+
+class ScheduleFile(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    original_name = db.Column(db.String(255), nullable=False)
+    stored_name = db.Column(db.String(255), nullable=False, unique=True)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    uploaded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    uploaded_by = db.relationship('User')
+
+
+class ScheduleWeek(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(120), nullable=False)
+    source_file_id = db.Column(db.Integer, db.ForeignKey('schedule_file.id'), nullable=False)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    source_file = db.relationship('ScheduleFile')
+    uploaded_by = db.relationship('User', foreign_keys=[uploaded_by_id])
+
+
+class ScheduleLesson(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    week_id = db.Column(db.Integer, db.ForeignKey('schedule_week.id'), nullable=False, index=True)
+    sheet_name = db.Column(db.String(50), nullable=False)
+    group_name = db.Column(db.String(60), nullable=False, index=True)
+    day_name = db.Column(db.String(20), nullable=False)
+    pair_number = db.Column(db.Integer, nullable=False)
+    time_range = db.Column(db.String(30), nullable=False)
+    subject = db.Column(db.String(200), default='')
+    teacher_name = db.Column(db.String(150), default='')
+    room = db.Column(db.String(60), default='')
+    content = db.Column(db.String(600), nullable=False)
+    content_half_1 = db.Column(db.String(400), default='')
+    content_half_2 = db.Column(db.String(400), default='')
+
+    week = db.relationship('ScheduleWeek', backref='lessons')
+
+
+def ensure_default_groups():
+    if Group.query.count() == 0:
+        for group_name in ['ИС-101', 'ИС-102', 'ИС-201']:
+            db.session.add(Group(name=group_name))
+        db.session.commit()
+
+
+def ensure_admin_user():
+    admin_email = app.config['ADMIN_EMAIL']
+    configured_password = app.config['ADMIN_PASSWORD']
+    existing_admin = User.query.filter_by(email=admin_email).first()
+    if existing_admin:
+        changed = False
+        if existing_admin.role != 'admin':
+            existing_admin.role = 'admin'
+            changed = True
+        if not existing_admin.is_verified:
+            existing_admin.is_verified = True
+            changed = True
+        if not getattr(existing_admin, 'username', None):
+            existing_admin.username = 'admin'
+            changed = True
+        # Синхронизируем пароль с конфигом, чтобы вход админа не ломался после правок ENV.
+        if not password_matches(existing_admin.password, configured_password):
+            existing_admin.password = generate_password_hash(configured_password)
+            changed = True
+
+        if changed:
+            db.session.commit()
+        return
+
+    db.session.add(
+        User(
+            name='Администратор Системы StudentHubik',
+            email=admin_email,
+            username='admin',
+            password=generate_password_hash(configured_password),
+            role='admin',
+            is_verified=True
+        )
+    )
+    db.session.commit()
+
+
+def ensure_teacher_subjects(teacher_id):
+    defaults = ['Математика', 'Информатика', 'Английский']
+    existing = {
+        subject.name.lower()
+        for subject in Subject.query.filter_by(teacher_id=teacher_id).all()
+    }
+
+    created = False
+    for subject_name in defaults:
+        if subject_name.lower() not in existing:
+            db.session.add(Subject(name=subject_name, teacher_id=teacher_id))
+            created = True
+
+    if created:
+        db.session.commit()
+
+
+def ensure_runtime_columns():
+    inspector = inspect(db.engine)
+
+    grade_columns = {column['name'] for column in inspector.get_columns('grade')}
+    if 'comment' not in grade_columns:
+        db.session.execute(text('ALTER TABLE grade ADD COLUMN comment VARCHAR(300) DEFAULT ""'))
+    if 'graded_at' not in grade_columns:
+        db.session.execute(text('ALTER TABLE grade ADD COLUMN graded_at DATETIME'))
+        db.session.execute(text('UPDATE grade SET graded_at = CURRENT_TIMESTAMP WHERE graded_at IS NULL'))
+    if 'semester' not in grade_columns:
+        db.session.execute(text('ALTER TABLE grade ADD COLUMN semester INTEGER DEFAULT 1'))
+        db.session.execute(text('UPDATE grade SET semester = 1 WHERE semester IS NULL OR semester < 1 OR semester > 2'))
+    if 'mark' not in grade_columns:
+        db.session.execute(text('ALTER TABLE grade ADD COLUMN mark VARCHAR(5) DEFAULT ""'))
+        db.session.execute(text('UPDATE grade SET mark = "" WHERE mark IS NULL'))
+
+    audit_columns = {column['name'] for column in inspector.get_columns('audit_log')}
+    if 'created_at' not in audit_columns:
+        db.session.execute(text('ALTER TABLE audit_log ADD COLUMN created_at DATETIME'))
+        db.session.execute(text('UPDATE audit_log SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL'))
+
+    user_columns = {column['name'] for column in inspector.get_columns('user')}
+    if 'username' not in user_columns:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN username VARCHAR(50)'))
+        existing_users = db.session.execute(text('SELECT id, email FROM user')).fetchall()
+        used_logins = set()
+        for user_id, email in existing_users:
+            base = normalize_login((email or f'user{user_id}').split('@')[0]) or f'user{user_id}'
+            candidate = base
+            suffix = 1
+            while candidate in used_logins:
+                suffix += 1
+                candidate = f'{base}{suffix}'[:50]
+            used_logins.add(candidate)
+            db.session.execute(text('UPDATE user SET username = :username WHERE id = :id'), {'username': candidate, 'id': user_id})
+    if 'theme' not in user_columns:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN theme VARCHAR(10) DEFAULT "dark"'))
+        db.session.execute(text("UPDATE user SET theme = 'dark' WHERE theme IS NULL OR theme = ''"))
+    if 'compact_mode' not in user_columns:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN compact_mode BOOLEAN DEFAULT 0'))
+        db.session.execute(text('UPDATE user SET compact_mode = 0 WHERE compact_mode IS NULL'))
+    if 'animations_enabled' not in user_columns:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN animations_enabled BOOLEAN DEFAULT 1'))
+        db.session.execute(text('UPDATE user SET animations_enabled = 1 WHERE animations_enabled IS NULL'))
+
+    table_names = set(inspector.get_table_names())
+    if 'schedule_lesson' in table_names:
+        schedule_columns = {column['name'] for column in inspector.get_columns('schedule_lesson')}
+        if 'subject' not in schedule_columns:
+            db.session.execute(text('ALTER TABLE schedule_lesson ADD COLUMN subject VARCHAR(200) DEFAULT ""'))
+        if 'teacher_name' not in schedule_columns:
+            db.session.execute(text('ALTER TABLE schedule_lesson ADD COLUMN teacher_name VARCHAR(150) DEFAULT ""'))
+        if 'room' not in schedule_columns:
+            db.session.execute(text('ALTER TABLE schedule_lesson ADD COLUMN room VARCHAR(60) DEFAULT ""'))
+
+    db.session.commit()
+
+
+def normalize_group_name(group_name):
+    return group_name.strip().upper()
+
+
+def email_looks_valid(email):
+    return re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email) is not None
+
+
+def normalize_login(login):
+    return re.sub(r'[^a-z0-9_.-]', '', (login or '').strip().lower())[:50]
+
+
+def login_looks_valid(login):
+    return re.match(r'^[a-z0-9][a-z0-9_.-]{2,49}$', login or '') is not None
+
+
+def find_user_by_login_identifier(identifier):
+    value = (identifier or '').strip().lower()
+    if not value:
+        return None
+    if '@' in value:
+        return User.query.filter_by(email=value).first()
+    return User.query.filter_by(username=normalize_login(value)).first()
+
+
+def log_audit(action, details='', should_commit=True):
+    actor_id = current_user.id if current_user.is_authenticated else None
+    db.session.add(AuditLog(actor_id=actor_id, action=action, details=details[:300], created_at=datetime.utcnow()))
+    if should_commit:
+        db.session.commit()
+
+
+def password_matches(password_hash, password):
+    try:
+        return check_password_hash(password_hash, password)
+    except ValueError:
+        return False
+
+
+def full_name_looks_valid(full_name):
+    parts = [part for part in full_name.split(' ') if part]
+    return len(parts) >= 3
+
+
+def get_or_create_csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_urlsafe(32)
+    return session['csrf_token']
+
+
+def validate_runtime_config():
+    if app.config.get('ENVIRONMENT') == 'production' and app.config.get('REQUIRE_STRONG_SECRET_IN_PROD'):
+        secret_key = app.config.get('SECRET_KEY', '')
+        if secret_key in {'', 'dev-key'} or len(secret_key) < 32:
+            raise RuntimeError('Unsafe SECRET_KEY for production. Set a strong SECRET_KEY (>=32 chars) or set REQUIRE_STRONG_SECRET_IN_PROD=0 for a temporary deploy.')
+    elif app.config.get('ENVIRONMENT') == 'production' and app.config.get('SECRET_KEY') in {'', 'dev-key'}:
+        app.logger.warning('Production deploy is using the default SECRET_KEY. Set SECRET_KEY in Railway variables for stable sessions.')
+
+
+def init_error_monitoring():
+    if sentry_sdk and app.config.get('SENTRY_DSN'):
+        sentry_sdk.init(
+            dsn=app.config['SENTRY_DSN'],
+            environment=app.config.get('ENVIRONMENT', 'development'),
+            traces_sample_rate=0.05
+        )
+
+
+def get_or_create_login_attempt(identifier):
+    attempt = LoginAttempt.query.filter_by(identifier=identifier).first()
+    if attempt:
+        return attempt
+
+    attempt = LoginAttempt(identifier=identifier, fail_count=0, blocked_until=None)
+    db.session.add(attempt)
+    db.session.flush()
+    return attempt
+
+
+def is_login_rate_limited(identifier):
+    now = datetime.utcnow()
+    attempt = LoginAttempt.query.filter_by(identifier=identifier).first()
+    if not attempt:
+        return False, 0
+
+    if attempt.blocked_until and attempt.blocked_until > now:
+        return True, int((attempt.blocked_until - now).total_seconds())
+
+    if attempt.blocked_until and attempt.blocked_until <= now:
+        attempt.blocked_until = None
+        attempt.fail_count = 0
+        db.session.commit()
+
+    return False, 0
+
+
+def register_login_failure(identifier):
+    attempt = get_or_create_login_attempt(identifier)
+    attempt.fail_count += 1
+
+    if attempt.fail_count >= app.config['LOGIN_MAX_ATTEMPTS']:
+        attempt.blocked_until = datetime.utcnow() + timedelta(minutes=app.config['LOGIN_BLOCK_MINUTES'])
+        attempt.fail_count = 0
+
+    db.session.commit()
+
+
+def clear_login_failures(identifier):
+    attempt = LoginAttempt.query.filter_by(identifier=identifier).first()
+    if not attempt:
+        return
+
+    attempt.fail_count = 0
+    attempt.blocked_until = None
+    db.session.commit()
+
+
+def send_password_reset_email(email_to, reset_link):
+    smtp_host = app.config.get('SMTP_HOST')
+    smtp_user = app.config.get('SMTP_USER')
+    smtp_password = app.config.get('SMTP_PASSWORD')
+    smtp_port = app.config.get('SMTP_PORT', 587)
+    smtp_use_tls = app.config.get('SMTP_USE_TLS', True)
+    smtp_use_ssl = app.config.get('SMTP_USE_SSL', False)
+    smtp_timeout = app.config.get('SMTP_TIMEOUT_SECONDS', 15)
+
+    if not smtp_host:
+        app.logger.warning('smtp_not_configured reset_link=%s', reset_link)
+        return False, 'smtp_not_configured'
+
+    message = EmailMessage()
+    message['Subject'] = 'StudentHubik: восстановление пароля'
+    message['From'] = app.config.get('SMTP_FROM_EMAIL')
+    message['To'] = email_to
+    message.set_content(
+        f'Для восстановления пароля перейдите по ссылке\n{reset_link}\n\n'
+        f'Ссылка действует {app.config.get("PASSWORD_RESET_TOKEN_MINUTES", 30)} минут.'
+    )
+
+    try:
+        if smtp_use_ssl:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=smtp_timeout) as smtp:
+                if smtp_user and smtp_password:
+                    smtp.login(smtp_user, smtp_password)
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=smtp_timeout) as smtp:
+                if smtp_use_tls:
+                    smtp.starttls()
+                if smtp_user and smtp_password:
+                    smtp.login(smtp_user, smtp_password)
+                smtp.send_message(message)
+    except Exception as error:
+        app.logger.exception('smtp_send_failed email=%s reason=%s', email_to, error)
+        return False, str(error)
+
+    return True, None
+
+
+def build_student_subject_grade_rows(grades):
+    by_subject = {}
+    for item in grades:
+        subject_name = item.subject.name if item.subject else '—'
+        group = by_subject.setdefault(subject_name, {'grades': [], 'avg': None})
+        group['grades'].append(item)
+
+    result = []
+    for subject_name, payload in sorted(by_subject.items(), key=lambda x: x[0].lower()):
+        ordered = sorted(payload['grades'], key=lambda g: (g.graded_at or datetime.min, g.id))
+        values = [g.grade for g in ordered if isinstance(g.grade, (int, float))]
+        avg_value = round(sum(values) / len(values), 2) if values else 0
+        result.append({'subject_name': subject_name, 'grades': ordered, 'avg': avg_value})
+
+    return result
+
+
+def build_student_progress_points(grades):
+    ordered = sorted(grades, key=lambda g: (g.graded_at or datetime.min, g.id))
+    points = []
+    running = []
+    for item in ordered:
+        if not isinstance(item.grade, (int, float)):
+            continue
+        running.append(item.grade)
+        points.append({
+            'label': (item.graded_at or datetime.utcnow()).strftime('%d.%m'),
+            'avg': round(sum(running) / len(running), 2)
+        })
+    return points
+
+
+
+
+
+
+def resolve_semester_filter(raw_value):
+    if raw_value in {'1', '2'}:
+        return int(raw_value)
+    return None
+
+
+def get_semester_averages(grades):
+    numeric = [g.grade for g in grades if isinstance(g.grade, (int, float))]
+    first = [g.grade for g in grades if g.semester == 1 and isinstance(g.grade, (int, float))]
+    second = [g.grade for g in grades if g.semester == 2 and isinstance(g.grade, (int, float))]
+    return {
+        'semester_1_avg': round(sum(first) / len(first), 2) if first else 0,
+        'semester_2_avg': round(sum(second) / len(second), 2) if second else 0,
+        'course_avg': round(sum(numeric) / len(numeric), 2) if numeric else 0
+    }
+
+
+def normalize_grade_input(raw_value):
+    value = normalize_cell_value(raw_value).upper()
+    if not value:
+        return None, None
+    if value in {'Н', 'Н/А', 'Н.А'}:
+        return None, 'Н'
+    try:
+        numeric = int(value)
+    except ValueError:
+        return 'invalid', None
+    if numeric < 1 or numeric > 5:
+        return 'invalid', None
+    return numeric, ''
+
+
+def create_notification(user_id, title, message):
+    db.session.add(Notification(user_id=user_id, title=title[:120], message=message[:300], is_read=False, created_at=datetime.utcnow()))
+
+
+def get_unread_notifications_count(user_id):
+    return Notification.query.filter_by(user_id=user_id, is_read=False).count()
+
+
+def get_latest_schedule_file():
+    return ScheduleFile.query.order_by(ScheduleFile.uploaded_at.desc(), ScheduleFile.id.desc()).first()
+
+
+def get_active_schedule_week():
+    return ScheduleWeek.query.filter_by(is_active=True).order_by(ScheduleWeek.created_at.desc(), ScheduleWeek.id.desc()).first()
+
+
+DAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
+DAY_ALIASES = {
+    'ПОНЕДЕЛЬНИК': 'Понедельник',
+    'ВТОРНИК': 'Вторник',
+    'ВТОРН': 'Вторник',
+    'СРЕДА': 'Среда',
+    'СРЕД': 'Среда',
+    'ЧЕТВЕРГ': 'Четверг',
+    'ЧЕТВ': 'Четверг',
+    'ПЯТНИЦА': 'Пятница',
+    'ПЯТН': 'Пятница',
+    'СУББОТА': 'Суббота',
+}
+PAIR_TIME_RANGES = {
+    1: '08:15–09:40',
+    2: '09:45–11:10',
+    3: '11:15–12:40',
+    4: '13:10–14:35',
+    5: '14:40–16:05',
+    6: '16:10–17:35',
+    7: '17:40–19:05',
+}
+
+
+def normalize_cell_value(value):
+    if value is None:
+        return ''
+    text_value = str(value).replace('\n', ' ').replace('\r', ' ')
+    return re.sub(r'\s+', ' ', text_value).strip()
+
+
+def looks_like_group_name(text_value):
+    candidate = normalize_cell_value(text_value).upper()
+    if len(candidate) < 3 or len(candidate) > 40:
+        return False
+    if any(ch in candidate for ch in ['|', '=', '+', '*']):
+        return False
+    if not any(ch.isdigit() for ch in candidate):
+        return False
+    if not any(('А' <= ch <= 'Я') or ('A' <= ch <= 'Z') for ch in candidate):
+        return False
+
+    # типичные не-групповые значения
+    banned_words = ('ПОНЕД', 'ВТОР', 'СРЕД', 'ЧЕТВ', 'ПЯТ', 'СУББ', 'ПАРА', 'КАБ', 'АУД', 'ВРЕМЯ')
+    if any(word in candidate for word in banned_words):
+        return False
+    if re.fullmatch(r'\d{1,2}[:.]\d{2}', candidate):
+        return False
+
+    # нормальные шаблоны групп: ИС24-01/2, МР25-01-1П, ТД-23 и т.п.
+    compact = candidate.replace(' ', '')
+    if re.search(r'[А-ЯA-Z]{1,8}\d{1,3}', compact):
+        return True
+
+    separators = compact.count('-') + compact.count('/')
+    return separators >= 1
+
+
+def parse_week_title_from_filename(filename):
+    match = re.search(r'(\d{1,2}[.-]\d{1,2}\s*[-–]\s*\d{1,2}[.-]\d{1,2})', filename)
+    if match:
+        return f'Неделя {match.group(1).replace(" ", "")}'
+    return f'Неделя от {datetime.utcnow().strftime("%d.%m.%Y")}'
+
+
+def read_excel_as_sheets(file_path):
+    extension = os.path.splitext(file_path)[1].lower()
+    if extension == '.xlsx':
+        if not openpyxl:
+            raise RuntimeError('Не установлен openpyxl для чтения .xlsx')
+        workbook = openpyxl.load_workbook(file_path, data_only=True)
+        sheets = []
+        for worksheet in workbook.worksheets:
+            max_row = worksheet.max_row or 0
+            max_col = worksheet.max_column or 0
+            matrix = [['' for _ in range(max_col)] for _ in range(max_row)]
+            for row_idx in range(1, max_row + 1):
+                for col_idx in range(1, max_col + 1):
+                    matrix[row_idx - 1][col_idx - 1] = normalize_cell_value(worksheet.cell(row=row_idx, column=col_idx).value)
+
+            for merged_range in worksheet.merged_cells.ranges:
+                min_col, min_row, max_col_m, max_row_m = merged_range.bounds
+                top_left = matrix[min_row - 1][min_col - 1]
+                for r in range(min_row - 1, max_row_m):
+                    for c in range(min_col - 1, max_col_m):
+                        if not matrix[r][c]:
+                            matrix[r][c] = top_left
+            sheets.append((worksheet.title, matrix))
+        return sheets
+
+    if extension == '.xls':
+        if not xlrd:
+            raise RuntimeError(
+                'Для чтения .xls нужен пакет xlrd==1.2.0. '
+                'Установите: pip install xlrd==1.2.0 или сохраните файл как .xlsx.'
+            )
+        workbook = xlrd.open_workbook(file_path, formatting_info=False)
+        sheets = []
+        for sheet in workbook.sheets():
+            matrix = []
+            for row_idx in range(sheet.nrows):
+                row = [normalize_cell_value(sheet.cell_value(row_idx, col_idx)) for col_idx in range(sheet.ncols)]
+                matrix.append(row)
+
+            for rlo, rhi, clo, chi in sheet.merged_cells:
+                top_left = matrix[rlo][clo] if rlo < len(matrix) and clo < len(matrix[rlo]) else ''
+                for r in range(rlo, rhi):
+                    for c in range(clo, chi):
+                        if r < len(matrix) and c < len(matrix[r]) and not matrix[r][c]:
+                            matrix[r][c] = top_left
+            sheets.append((sheet.name, matrix))
+        return sheets
+
+    raise RuntimeError('Поддерживаются только файлы .xls и .xlsx')
+
+
+def parse_schedule_matrix(sheet_name, matrix):
+    if not matrix:
+        return []
+
+    max_cols = max((len(row) for row in matrix), default=0)
+    if max_cols == 0:
+        return []
+
+    def extract_groups_from_row(row):
+        candidates = []
+        for col_idx in range(max_cols):
+            value = normalize_cell_value(row[col_idx]) if col_idx < len(row) else ''
+            if looks_like_group_name(value):
+                candidates.append((value.upper(), col_idx))
+
+        # Убираем дубли merged-ячеек подряд (в merged-блоках одно имя может тянуться на 2-5 колонок)
+        unique = []
+        last_name = None
+        for name, col in candidates:
+            if name == last_name:
+                continue
+            unique.append((name, col))
+            last_name = name
+        return unique
+
+    def extract_slot_number(cells):
+        for cell_value in cells:
+            match = re.search(r'\b(1[0-4]|[1-9])\b', cell_value)
+            if match:
+                slot = int(match.group(1))
+                if 1 <= slot <= 14:
+                    return slot
+        return None
+
+    # В одном листе может быть несколько блоков с разными строками заголовков групп.
+    header_rows = {}
+    for row_idx in range(len(matrix)):
+        groups_here = extract_groups_from_row(matrix[row_idx])
+        if len(groups_here) >= 2:
+            header_rows[row_idx] = groups_here
+
+    if not header_rows:
+        return []
+
+    lesson_map = {}
+    current_day = ''
+    inferred_day_idx = 0
+    previous_slot = None
+    active_groups = []
+
+    for row_idx in range(len(matrix)):
+        row = matrix[row_idx]
+
+        # Если встретили новую строку заголовков групп — переключаем контекст.
+        if row_idx in header_rows:
+            active_groups = sorted(header_rows[row_idx], key=lambda x: x[1])
+            current_day = ''
+            previous_slot = None
+            continue
+
+        if not active_groups:
+            continue
+
+        left_cells = [normalize_cell_value(row[c]) if c < len(row) else '' for c in range(min(5, max_cols))]
+
+        for left_cell in left_cells:
+            upper_cell = left_cell.upper().replace('.', '').strip()
+            for alias, normalized_day in DAY_ALIASES.items():
+                if alias in upper_cell:
+                    current_day = normalized_day
+                    if normalized_day in DAY_NAMES:
+                        inferred_day_idx = DAY_NAMES.index(normalized_day)
+                    break
+
+        slot_number = extract_slot_number(left_cells)
+        if slot_number is None:
+            continue
+
+        if not current_day:
+            current_day = DAY_NAMES[min(inferred_day_idx, len(DAY_NAMES) - 1)]
+        elif previous_slot and slot_number < previous_slot and slot_number <= 2:
+            inferred_day_idx = min(inferred_day_idx + 1, len(DAY_NAMES) - 1)
+            current_day = DAY_NAMES[inferred_day_idx]
+
+        previous_slot = slot_number
+        pair_number = (slot_number + 1) // 2
+        half_key = 1 if slot_number % 2 == 1 else 2
+
+        for idx, (group_name, start_col) in enumerate(active_groups):
+            end_col = active_groups[idx + 1][1] if idx + 1 < len(active_groups) else max_cols
+            segment_values = []
+            for c in range(start_col, end_col):
+                if c >= len(row):
+                    continue
+                value = normalize_cell_value(row[c])
+                if value and not looks_like_group_name(value):
+                    segment_values.append(value)
+
+            if not segment_values:
+                continue
+
+            unique_values = []
+            for value in segment_values:
+                if value not in unique_values:
+                    unique_values.append(value)
+
+            payload = ' | '.join(unique_values)[:390]
+            map_key = (sheet_name, group_name, current_day, pair_number)
+            lesson_map.setdefault(map_key, {1: '', 2: ''})
+            if payload:
+                previous = lesson_map[map_key][half_key]
+                lesson_map[map_key][half_key] = payload if not previous else f'{previous} / {payload}'[:390]
+
+    results = []
+    for (sheet_value, group_name, day_name, pair_number), halves in lesson_map.items():
+        half_1 = halves.get(1, '')
+        half_2 = halves.get(2, '')
+        if half_1 and half_2 and half_1 != half_2:
+            combined = f'{half_1} || {half_2}'[:590]
+        else:
+            combined = (half_1 or half_2)[:590]
+
+        if not combined:
+            continue
+
+        results.append({
+            'sheet_name': sheet_value,
+            'group_name': group_name,
+            'day_name': day_name,
+            'pair_number': pair_number,
+            'time_range': PAIR_TIME_RANGES.get(pair_number, 'Время уточняется'),
+            'content': combined,
+            'content_half_1': half_1,
+            'content_half_2': half_2,
+        })
+
+    results.sort(key=lambda item: (
+        item['sheet_name'],
+        item['group_name'],
+        DAY_NAMES.index(item['day_name']) if item['day_name'] in DAY_NAMES else 99,
+        item['pair_number']
+    ))
+    return results
+
+
+def parse_schedule_file(file_path):
+    sheets = read_excel_as_sheets(file_path)
+    lessons = []
+    for sheet_name, matrix in sheets:
+        lessons.extend(parse_schedule_matrix(sheet_name, matrix))
+    return lessons
+
+
+def build_schedule_view(lessons):
+    grouped = {day: [] for day in DAY_NAMES}
+    for lesson in sorted(lessons, key=lambda x: (DAY_NAMES.index(x.day_name) if x.day_name in DAY_NAMES else 99, x.pair_number)):
+        grouped.setdefault(lesson.day_name, []).append(lesson)
+    return grouped
+
+
+def apply_period_filter(query, period_value):
+    now = datetime.utcnow()
+    if period_value == 'week':
+        return query.filter(Grade.graded_at >= now - timedelta(days=7))
+    if period_value == 'month':
+        return query.filter(Grade.graded_at >= now - timedelta(days=31))
+    return query
+
+
+def paginate_items(items, page, per_page):
+    total = len(items)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, pages))
+    start = (page - 1) * per_page
+    end = start + per_page
+    return items[start:end], total, pages, page
+
+
+def safe_url_for(endpoint, **values):
+    try:
+        return url_for(endpoint, **values)
+    except Exception:
+        return None
+
+
+def get_user_avatar_url(user_id):
+    if not user_id:
+        return ''
+    avatar_dir = app.config.get('AVATAR_UPLOAD_DIR')
+    for extension in sorted(app.config.get('AVATAR_ALLOWED_EXTENSIONS', set())):
+        filename = f'user_{user_id}.{extension}'
+        if os.path.exists(os.path.join(avatar_dir, filename)):
+            return url_for('static', filename=f'avatars/{filename}')
+    return ''
+
+
+def save_user_avatar(user, uploaded_file):
+    if not uploaded_file or not uploaded_file.filename:
+        return True, False, ''
+
+    original_name = secure_filename(uploaded_file.filename)
+    extension = original_name.rsplit('.', 1)[-1].lower() if '.' in original_name else ''
+    if extension not in app.config.get('AVATAR_ALLOWED_EXTENSIONS', set()):
+        return False, False, 'Загрузите аватар в формате PNG, JPG, WEBP или GIF'
+
+    avatar_dir = app.config.get('AVATAR_UPLOAD_DIR')
+    os.makedirs(avatar_dir, exist_ok=True)
+    for old_extension in app.config.get('AVATAR_ALLOWED_EXTENSIONS', set()):
+        old_path = os.path.join(avatar_dir, f'user_{user.id}.{old_extension}')
+        if os.path.exists(old_path):
+            os.remove(old_path)
+
+    uploaded_file.save(os.path.join(avatar_dir, f'user_{user.id}.{extension}'))
+    return True, True, ''
+
+
+def redirect_to_role_dashboard():
+    if current_user.role == 'student':
+        return redirect(url_for('student_dashboard'))
+    if current_user.role == 'teacher':
+        return redirect(url_for('teacher_dashboard'))
+    if current_user.role in {'admin', 'curator'}:
+        return redirect(url_for('admin_dashboard'))
+    return redirect(url_for('index'))
+
+
+@app.context_processor
+def inject_template_security():
+    default_ui = {'theme': 'dark', 'compact': 'off', 'animations': 'on'}
+    if current_user.is_authenticated:
+        user_theme = getattr(current_user, 'theme', 'dark') or 'dark'
+        user_compact = bool(getattr(current_user, 'compact_mode', False))
+        user_animations = bool(getattr(current_user, 'animations_enabled', True))
+        default_ui = {
+            'theme': user_theme if user_theme in {'dark', 'light'} else 'dark',
+            'compact': 'on' if user_compact else 'off',
+            'animations': 'on' if user_animations else 'off'
+        }
+
+    unread_notifications = 0
+    if current_user.is_authenticated:
+        unread_notifications = get_unread_notifications_count(current_user.id)
+
+    return {
+        'csrf_token': get_or_create_csrf_token(),
+        'ui_settings': default_ui,
+        'unread_notifications': unread_notifications,
+        'college_name': app.config.get('COLLEGE_NAME'),
+        'safe_url_for': safe_url_for,
+        'user_avatar_url': get_user_avatar_url(current_user.id) if current_user.is_authenticated else ''
+    }
+
+
+@app.before_request
+def enforce_csrf_protection():
+    if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        return
+
+    sent_token = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token')
+    if not sent_token or sent_token != session.get('csrf_token'):
+        app.logger.warning('csrf_validation_failed path=%s ip=%s', request.path, request.remote_addr)
+        abort(400)
+
+
+@app.before_request
+def initialize_database():
+    if app.config.get('DB_INITIALIZED'):
+        return
+
+    validate_runtime_config()
+    os.makedirs(app.config.get('SCHEDULE_UPLOAD_DIR'), exist_ok=True)
+    os.makedirs(app.config.get('AVATAR_UPLOAD_DIR'), exist_ok=True)
+    db.create_all()
+    ensure_runtime_columns()
+    ensure_default_groups()
+    ensure_admin_user()
+    stale_threshold = datetime.utcnow() - timedelta(days=30)
+    LoginAttempt.query.filter(
+        LoginAttempt.blocked_until.is_(None),
+        LoginAttempt.fail_count == 0,
+        LoginAttempt.updated_at < stale_threshold
+    ).delete()
+    db.session.commit()
+    init_error_monitoring()
+    app.config['DB_INITIALIZED'] = True
+
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    try:
+        return db.session.get(User, int(user_id))
+    except (TypeError, ValueError):
+        return None
 
 
-# ====== ГЛАВНАЯ СТРАНИЦА ======
 @app.route('/')
 def index():
+    if current_user.is_authenticated:
+        return redirect_to_role_dashboard()
     return render_template('index.html')
 
 
-# ====== РЕГИСТРАЦИЯ ======
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    groups = Group.query.all()
+    groups = Group.query.order_by(Group.name).all()
 
     if request.method == 'POST':
-        name = request.form.get('name')
-        email = request.form.get('email')
-        password = request.form.get('password')
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        username = normalize_login(request.form.get('username', ''))
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
         role = request.form.get('role')
-        group_id = request.form.get('group_id')
+        group_name = request.form.get('group_name', '').strip()
 
-        if not name or not email or not password or not role:
-            flash("Заполните все поля")
+        if not name or not email or not username or not password or not role:
+            flash('Заполните все обязательные поля')
+            return redirect(url_for('register'))
+
+        if not full_name_looks_valid(name):
+            flash('Введите полное ФИО (минимум 3 слова)')
+            return redirect(url_for('register'))
+
+        if not email_looks_valid(email):
+            flash('Email введён некорректно')
+            return redirect(url_for('register'))
+
+        if not login_looks_valid(username):
+            flash('Логин должен быть 3-50 символов: латиница, цифры, точка, подчёркивание или дефис')
+            return redirect(url_for('register'))
+
+        if password != confirm_password:
+            flash('Пароли не совпадают')
+            return redirect(url_for('register'))
+
+        if role not in {'student', 'teacher'}:
+            flash('Выберите корректную роль')
             return redirect(url_for('register'))
 
         if User.query.filter_by(email=email).first():
-            flash("Пользователь уже существует")
+            flash('Пользователь с таким email уже существует')
             return redirect(url_for('register'))
+
+        if User.query.filter_by(username=username).first():
+            flash('Такой логин уже занят')
+            return redirect(url_for('register'))
+
+        selected_group_id = None
+        if role == 'student':
+            if not group_name:
+                flash('Для студента нужно выбрать группу')
+                return redirect(url_for('register'))
+
+            normalized_group = normalize_group_name(group_name)
+            group = Group.query.filter_by(name=normalized_group).first()
+            if not group:
+                flash('Такой группы нет в системе. Выберите из списка.')
+                return redirect(url_for('register'))
+            selected_group_id = group.id
 
         new_user = User(
             name=name,
             email=email,
+            username=username,
             password=generate_password_hash(password),
             role=role,
-            group_id=group_id if role == 'student' else None
+            group_id=selected_group_id,
+            is_verified=False
         )
 
         db.session.add(new_user)
         db.session.commit()
 
-        flash("Регистрация успешна")
+        if role == 'teacher':
+            flash('Заявка преподавателя отправлена. Дождитесь одобрения администратора.')
+        else:
+            flash('Заявка студента отправлена. Дождитесь одобрения администратора.')
+
         return redirect(url_for('login', role=role))
 
     return render_template('register.html', groups=groups)
 
-# ====== ВХОД ======
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    role = request.args.get('role')
+    role = request.args.get('role', 'student')
+
+    if current_user.is_authenticated and request.method == 'GET':
+        return redirect_to_role_dashboard()
 
     if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
+        login_identifier = request.form.get('login_identifier', '').strip().lower()
+        password = request.form.get('password', '')
         selected_role = request.form.get('role')
 
-        user = User.query.filter_by(email=email).first()
+        identifier = f"{request.remote_addr}:{login_identifier}"
+        blocked, seconds_left = is_login_rate_limited(identifier)
+        if blocked:
+            flash(f'Слишком много попыток входа. Повторите через {max(1, seconds_left // 60)} мин.')
+            return render_template('login.html', role=role)
 
-        if user and check_password_hash(user.password, password):
+        user = find_user_by_login_identifier(login_identifier)
 
-            # 🔥 ПРОВЕРКА РОЛИ
+        if user and password_matches(user.password, password):
+            if selected_role not in {'student', 'teacher', 'admin', 'curator'}:
+                selected_role = user.role
+
             if user.role != selected_role:
-                flash("Вы пытаетесь войти не в ту роль")
-                return redirect(url_for('login', role=selected_role))
+                flash(f'Вы вошли как {user.role}, т.к. аккаунт зарегистрирован в этой роли')
 
-            login_user(user)
+            if user.role in {'student', 'teacher'} and not user.is_verified:
+                flash('Ваша заявка ещё не одобрена администратором')
+                return redirect(url_for('login', role=user.role))
+
+            remember_me = request.form.get('remember_me') == 'on'
+            login_user(user, remember=remember_me)
+            clear_login_failures(identifier)
+            log_audit('login_success', f'user={user.email}, role={user.role}')
 
             if user.role == 'teacher':
                 return redirect(url_for('teacher_dashboard'))
-            else:
-                return redirect(url_for('student_dashboard'))
+            if user.role == 'admin':
+                return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('student_dashboard'))
 
-        flash("Неверный email или пароль")
+        register_login_failure(identifier)
+        log_audit('login_failed', f'login={login_identifier}, role={selected_role or role}')
+        flash('Неверный логин или пароль')
 
-    return render_template("login.html", role=role)
+    return render_template('login.html', role=role)
 
-# ====== КАБИНЕТ ======
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        user = User.query.filter_by(email=email).first()
+
+        if user:
+            reset_entry = PasswordResetToken.query.filter_by(user_id=user.id, is_used=False).order_by(PasswordResetToken.id.desc()).first()
+            now = datetime.utcnow()
+            min_interval = app.config.get('PASSWORD_RESET_MIN_INTERVAL_SECONDS', 60)
+
+            if reset_entry and reset_entry.expires_at >= now:
+                token_created_at = reset_entry.expires_at - timedelta(minutes=app.config['PASSWORD_RESET_TOKEN_MINUTES'])
+                if (now - token_created_at).total_seconds() < min_interval:
+                    reset_link = url_for('reset_password', token=reset_entry.token, _external=True)
+                    sent, send_reason = send_password_reset_email(user.email, reset_link)
+                    if not sent:
+                        app.logger.info('password_reset_link_for_%s: %s', user.email, reset_link)
+                        if app.config.get('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL') and app.config.get('ENVIRONMENT') != 'production':
+                            flash(f'Тестовый режим: отправка почты не удалась ({send_reason}). Ссылка: {reset_link}')
+                    flash('Если email есть в системе, мы отправили ссылку для восстановления пароля.')
+                    return redirect(url_for('login'))
+
+            PasswordResetToken.query.filter_by(user_id=user.id, is_used=False).update({'is_used': True})
+            token = secrets.token_urlsafe(36)
+            expires_at = now + timedelta(minutes=app.config['PASSWORD_RESET_TOKEN_MINUTES'])
+            db.session.add(PasswordResetToken(user_id=user.id, token=token, expires_at=expires_at, is_used=False))
+            db.session.commit()
+
+            reset_link = url_for('reset_password', token=token, _external=True)
+            sent, send_reason = send_password_reset_email(user.email, reset_link)
+            if not sent:
+                app.logger.info('password_reset_link_for_%s: %s', user.email, reset_link)
+                if app.config.get('DEBUG_SHOW_RESET_LINK_ON_EMAIL_FAIL') and app.config.get('ENVIRONMENT') != 'production':
+                    flash(f'Тестовый режим: отправка почты не удалась ({send_reason}). Ссылка: {reset_link}')
+
+        flash('Если email есть в системе, мы отправили ссылку для восстановления пароля.')
+        return redirect(url_for('login'))
+
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    reset_entry = PasswordResetToken.query.filter_by(token=token, is_used=False).first()
+
+    if not reset_entry or reset_entry.expires_at < datetime.utcnow():
+        flash('Ссылка недействительна или истекла')
+        return redirect(url_for('forgot_password'))
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
+
+        if len(password) < 6:
+            flash('Пароль должен быть не короче 6 символов')
+            return redirect(url_for('reset_password', token=token))
+
+        if password != confirm_password:
+            flash('Пароли не совпадают')
+            return redirect(url_for('reset_password', token=token))
+
+        reset_entry.user.password = generate_password_hash(password)
+        reset_entry.is_used = True
+        db.session.commit()
+        log_audit('password_reset', f'user={reset_entry.user.email}')
+        flash('Пароль успешно обновлён. Теперь войдите с новым паролем.')
+        return redirect(url_for('login'))
+
+    return render_template('reset_password.html', token=token)
+
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    if current_user.role == 'student':
-        grades = Grade.query.filter_by(student_id=current_user.id).all()
-        return render_template('student_dashboard.html', grades=grades)
-
-    if current_user.role == 'teacher':
-        return redirect('/teacher')
-
-    return redirect('/')
+    return redirect_to_role_dashboard()
 
 
-
-
-# ====== ВЫХОД ======
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('login'))
 
+
+@app.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        telegram = request.form.get('telegram', '').strip()
+        username = normalize_login(request.form.get('username', getattr(current_user, 'username', '') or ''))
+
+        if not full_name_looks_valid(name):
+            flash('Введите полное ФИО (минимум 3 слова)')
+            return redirect(url_for('profile'))
+
+        if not login_looks_valid(username):
+            flash('Логин должен быть 3-50 символов: латиница, цифры, точка, подчёркивание или дефис')
+            return redirect(url_for('profile'))
+        existing_login = User.query.filter(User.username == username, User.id != current_user.id).first()
+        if existing_login:
+            flash('Такой логин уже занят')
+            return redirect(url_for('profile'))
+
+        current_user.name = name
+        current_user.username = username
+        current_user.telegram = telegram
+
+        avatar_ok, avatar_changed, avatar_error = save_user_avatar(current_user, request.files.get('avatar'))
+        if not avatar_ok:
+            flash(avatar_error)
+            return redirect(url_for('profile'))
+        if avatar_changed:
+            log_audit('change_avatar', f'user={current_user.id}', should_commit=False)
+
+        current_password = request.form.get('current_password', '')
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        if new_password or confirm_password or current_password:
+            if not check_password_hash(current_user.password, current_password):
+                flash('Текущий пароль указан неверно')
+                return redirect(url_for('profile'))
+            if len(new_password) < 6:
+                flash('Новый пароль должен быть не короче 6 символов')
+                return redirect(url_for('profile'))
+            if new_password != confirm_password:
+                flash('Новые пароли не совпадают')
+                return redirect(url_for('profile'))
+            current_user.password = generate_password_hash(new_password)
+            log_audit('change_password', f'user={current_user.id}', should_commit=False)
+
+        db.session.commit()
+        flash('Профиль обновлён')
+        return redirect(url_for('profile'))
+
+    return render_template('profile.html')
+
+
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    if request.method == 'POST':
+        theme = request.form.get('theme', 'dark')
+        compact_mode = request.form.get('compact_mode', 'off')
+        animations_enabled = request.form.get('animations_enabled', 'on')
+
+        current_user.theme = theme if theme in {'dark', 'light'} else 'dark'
+        current_user.compact_mode = compact_mode == 'on'
+        current_user.animations_enabled = animations_enabled != 'off'
+        db.session.commit()
+        flash('Настройки сохранены')
+        return redirect(url_for('settings'))
+
+    return render_template('settings.html')
+
+
+@app.route('/support')
+def support():
+    return render_template(
+        'support.html',
+        support_username=os.getenv('SUPPORT_USERNAME', '@cestlavieq'),
+        support_email=os.getenv('SUPPORT_EMAIL', app.config.get('ADMIN_EMAIL', '')),
+        support_telegram=os.getenv('SUPPORT_TELEGRAM', 'https://t.me/cestlavieq'),
+        support_vk=os.getenv('SUPPORT_VK', ''),
+        support_whatsapp=os.getenv('SUPPORT_WHATSAPP', '')
+    )
+
+
+@app.route('/privacy')
+def privacy_policy():
+    return render_template('privacy.html')
+
+
+@app.route('/terms')
+def terms_of_use():
+    return render_template('terms.html')
+
+
+@app.route('/security-policy')
+def security_policy():
+    return render_template('security_policy.html')
+
+
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    status = request.args.get('status', 'all')
+    query = Notification.query.filter_by(user_id=current_user.id)
+    if status == 'unread':
+        query = query.filter_by(is_read=False)
+    elif status == 'read':
+        query = query.filter_by(is_read=True)
+
+    items = query.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(200).all()
+    return render_template('notifications.html', notifications=items, status_filter=status)
+
+
+@app.route('/notifications/read/<int:notification_id>', methods=['POST'])
+@login_required
+def mark_notification_read(notification_id):
+    notification = Notification.query.filter_by(id=notification_id, user_id=current_user.id).first()
+    if not notification:
+        flash('Уведомление не найдено')
+        return redirect(url_for('notifications_page'))
+
+    notification.is_read = True
+    db.session.commit()
+    return redirect(url_for('notifications_page'))
+
+
+@app.route('/notifications/read-all', methods=['POST'])
+@login_required
+def mark_all_notifications_read():
+    Notification.query.filter_by(user_id=current_user.id, is_read=False).update({'is_read': True})
+    db.session.commit()
+    flash('Все уведомления помечены как прочитанные')
+    return redirect(url_for('notifications_page'))
+
+
+@app.route('/schedule')
+@login_required
+def schedule_page():
+    latest_schedule = get_latest_schedule_file()
+    schedule_history = ScheduleFile.query.order_by(ScheduleFile.uploaded_at.desc(), ScheduleFile.id.desc()).limit(app.config.get('MAX_SCHEDULE_HISTORY', 20)).all()
+    active_week = get_active_schedule_week()
+
+    sheet_filter = request.args.get('sheet', 'all')
+    group_filter = request.args.get('group', 'my')
+    selected_group = request.args.get('group_name', '').strip().upper()
+
+    all_groups = []
+    all_sheets = []
+    lessons_query = ScheduleLesson.query
+    if active_week:
+        lessons_query = lessons_query.filter_by(week_id=active_week.id)
+        all_groups = [row[0] for row in db.session.query(ScheduleLesson.group_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.group_name).all()]
+        all_sheets = [row[0] for row in db.session.query(ScheduleLesson.sheet_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.sheet_name).all()]
+
+    if sheet_filter != 'all':
+        lessons_query = lessons_query.filter(ScheduleLesson.sheet_name == sheet_filter)
+
+    my_group = ''
+    if current_user.role == 'student' and current_user.group_id:
+        group = Group.query.get(current_user.group_id)
+        if group:
+            my_group = group.name.upper()
+
+    if group_filter == 'my' and my_group:
+        lessons_query = lessons_query.filter(ScheduleLesson.group_name == my_group)
+        selected_group = my_group
+    elif selected_group:
+        lessons_query = lessons_query.filter(ScheduleLesson.group_name == selected_group)
+    elif all_groups:
+        selected_group = all_groups[0]
+        lessons_query = lessons_query.filter(ScheduleLesson.group_name == selected_group)
+
+    lessons = lessons_query.order_by(ScheduleLesson.day_name, ScheduleLesson.pair_number).all() if active_week else []
+    schedule_grid = build_schedule_view(lessons)
+
+    return render_template(
+        'schedule.html',
+        latest_schedule=latest_schedule,
+        schedule_history=schedule_history,
+        active_week=active_week,
+        schedule_grid=schedule_grid,
+        all_groups=all_groups,
+        all_sheets=all_sheets,
+        selected_group=selected_group,
+        selected_sheet=sheet_filter,
+        group_filter_mode=group_filter,
+        my_group=my_group,
+    )
+
+
+@app.route('/schedule/file/<int:file_id>')
+@login_required
+def download_schedule(file_id):
+    schedule_file = ScheduleFile.query.get(file_id)
+    if not schedule_file:
+        flash('Файл расписания не найден')
+        return redirect(url_for('schedule_page'))
+
+    return send_from_directory(
+        app.config.get('SCHEDULE_UPLOAD_DIR'),
+        schedule_file.stored_name,
+        as_attachment=True,
+        download_name=schedule_file.original_name
+    )
+
+
+def publish_parsed_schedule(source_file_id, source_filename, parsed_lessons):
+    ScheduleWeek.query.update({'is_active': False})
+    week = ScheduleWeek(
+        title=parse_week_title_from_filename(source_filename),
+        source_file_id=source_file_id,
+        uploaded_by_id=current_user.id,
+        created_at=datetime.utcnow(),
+        is_active=True
+    )
+    db.session.add(week)
+    db.session.flush()
+
+    sheet_set = set()
+    group_set = set()
+    for row in parsed_lessons:
+        content_text = row['content'][:600]
+        parts = [part.strip() for part in re.split(r'\||/', content_text) if part.strip()]
+        db.session.add(ScheduleLesson(
+            week_id=week.id,
+            sheet_name=row['sheet_name'][:50],
+            group_name=row['group_name'][:60],
+            day_name=row['day_name'][:20],
+            pair_number=row['pair_number'],
+            time_range=row['time_range'][:30],
+            subject=(parts[0] if len(parts) > 0 else '')[:200],
+            teacher_name=(parts[1] if len(parts) > 1 else '')[:150],
+            room=(parts[2] if len(parts) > 2 else '')[:60],
+            content=content_text,
+            content_half_1=row['content_half_1'][:400],
+            content_half_2=row['content_half_2'][:400],
+        ))
+        sheet_set.add(row['sheet_name'])
+        group_set.add(row['group_name'])
+
+    db.session.commit()
+    return week, len(sheet_set), len(group_set)
+
+
+@app.route('/admin/schedule/upload', methods=['POST'])
+@login_required
+def admin_upload_schedule():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    schedule = request.files.get('schedule_file')
+    if not schedule or not schedule.filename:
+        flash('Выберите файл расписания')
+        return redirect(url_for('admin_dashboard'))
+
+    safe_name = secure_filename(schedule.filename)
+    if not safe_name:
+        flash('Некорректное имя файла')
+        return redirect(url_for('admin_dashboard'))
+
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in {'.xls', '.xlsx'}:
+        flash('Поддерживаются только Excel-файлы .xls и .xlsx')
+        return redirect(url_for('admin_dashboard'))
+
+    stamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    stored_name = f'{stamp}_{safe_name}'
+    full_path = os.path.join(app.config.get('SCHEDULE_UPLOAD_DIR'), stored_name)
+    schedule.save(full_path)
+
+    schedule_file = ScheduleFile(
+        original_name=schedule.filename,
+        stored_name=stored_name,
+        uploaded_by_id=current_user.id,
+        uploaded_at=datetime.utcnow()
+    )
+    db.session.add(schedule_file)
+    db.session.flush()
+
+    try:
+        parsed_lessons = parse_schedule_file(full_path)
+    except Exception as error:
+        db.session.rollback()
+        if os.path.exists(full_path):
+            os.remove(full_path)
+        app.logger.exception('schedule_parse_failed: %s', error)
+        error_text = str(error)
+        if 'xlrd' in error_text.lower() and '.xls' in error_text:
+            flash('Не установлен пакет для .xls. Выполните: pip install xlrd==1.2.0 и перезапустите сервер, либо сохраните файл как .xlsx')
+        else:
+            flash(f'Не удалось обработать Excel: {error_text}')
+        return redirect(url_for('admin_dashboard'))
+
+    if not parsed_lessons:
+        db.session.rollback()
+        if os.path.exists(full_path):
+            os.remove(full_path)
+        flash('Не удалось распознать структуру Excel. Проверьте, что это недельное расписание с названиями групп и нумерацией пар 1-14, либо сохраните файл в .xlsx и попробуйте снова.')
+        return redirect(url_for('admin_dashboard'))
+
+    week, sheet_count, group_count = publish_parsed_schedule(schedule_file.id, schedule.filename, parsed_lessons)
+    log_audit('upload_schedule', f'file={schedule.filename}, lessons={len(parsed_lessons)}, sheets={sheet_count}, groups={group_count}')
+    flash(f'Расписание обработано: {len(parsed_lessons)} записей, вкладок: {sheet_count}, групп: {group_count}. Неделя опубликована.')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/schedule/reparse-latest', methods=['POST'])
+@login_required
+def admin_reparse_latest_schedule():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    latest_file = get_latest_schedule_file()
+    if not latest_file:
+        flash('Нет загруженного файла расписания для повторного разбора')
+        return redirect(url_for('admin_dashboard'))
+
+    full_path = os.path.join(app.config.get('SCHEDULE_UPLOAD_DIR'), latest_file.stored_name)
+    if not os.path.exists(full_path):
+        flash('Исходный Excel-файл не найден на сервере')
+        return redirect(url_for('admin_dashboard'))
+
+    try:
+        parsed_lessons = parse_schedule_file(full_path)
+    except Exception as error:
+        app.logger.exception('schedule_reparse_failed: %s', error)
+        flash(f'Повторный разбор не удался: {error}')
+        return redirect(url_for('admin_dashboard'))
+
+    if not parsed_lessons:
+        flash('Повторный разбор не нашел занятий. Проверьте структуру Excel.')
+        return redirect(url_for('admin_dashboard'))
+
+    week, sheet_count, group_count = publish_parsed_schedule(latest_file.id, latest_file.original_name, parsed_lessons)
+    log_audit('reparse_schedule', f'file_id={latest_file.id}, week_id={week.id}, lessons={len(parsed_lessons)}, sheets={sheet_count}, groups={group_count}')
+    flash(f'Повторный разбор завершен: занятий {len(parsed_lessons)}, вкладок {sheet_count}, групп {group_count}.')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/schedule/lesson/<int:lesson_id>/edit', methods=['POST'])
+@login_required
+def admin_edit_schedule_lesson(lesson_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    lesson = db.session.get(ScheduleLesson, lesson_id)
+    if not lesson:
+        flash('Занятие не найдено')
+        return redirect(url_for('schedule_page'))
+
+    lesson.sheet_name = normalize_cell_value(request.form.get('sheet_name', lesson.sheet_name))[:50] or lesson.sheet_name
+    lesson.group_name = normalize_cell_value(request.form.get('group_name', lesson.group_name)).upper()[:60] or lesson.group_name
+    lesson.day_name = normalize_cell_value(request.form.get('day_name', lesson.day_name))[:20] or lesson.day_name
+    try:
+        pair_number = int(request.form.get('pair_number', lesson.pair_number))
+    except ValueError:
+        pair_number = lesson.pair_number
+    lesson.pair_number = min(7, max(1, pair_number))
+    lesson.time_range = normalize_cell_value(request.form.get('time_range', lesson.time_range))[:30] or lesson.time_range
+
+    lesson.subject = normalize_cell_value(request.form.get('subject', lesson.subject))[:200]
+    lesson.teacher_name = normalize_cell_value(request.form.get('teacher_name', lesson.teacher_name))[:150]
+    lesson.room = normalize_cell_value(request.form.get('room', lesson.room))[:60]
+
+    content = normalize_cell_value(request.form.get('content', ''))
+    if not content:
+        content = ' | '.join([part for part in [lesson.subject, lesson.teacher_name, lesson.room] if part]).strip()
+    lesson.content = (content or lesson.content)[:600]
+
+    db.session.commit()
+    log_audit('edit_schedule_lesson', f'lesson_id={lesson.id}, group={lesson.group_name}')
+    flash('Занятие обновлено вручную')
+    return redirect(url_for('schedule_page', group_name=lesson.group_name, sheet=lesson.sheet_name, group='all'))
+
+
+@app.route('/admin/schedule/lesson/create', methods=['POST'])
+@login_required
+def admin_create_schedule_lesson():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    active_week = get_active_schedule_week()
+    if not active_week:
+        flash('Сначала загрузите Excel, чтобы создать активную неделю')
+        return redirect(url_for('admin_dashboard'))
+
+    group_name = normalize_cell_value(request.form.get('group_name', '')).upper()
+    sheet_name = normalize_cell_value(request.form.get('sheet_name', 'ОБЩЕЕ'))
+    day_name = normalize_cell_value(request.form.get('day_name', 'Понедельник'))
+    try:
+        pair_number = int(request.form.get('pair_number', '1'))
+    except ValueError:
+        pair_number = 1
+
+    if not group_name:
+        flash('Укажите название группы')
+        return redirect(url_for('schedule_page'))
+
+    time_range = normalize_cell_value(request.form.get('time_range', PAIR_TIME_RANGES.get(pair_number, 'Время уточняется')))[:30]
+    subject = normalize_cell_value(request.form.get('subject', ''))[:200]
+    teacher_name = normalize_cell_value(request.form.get('teacher_name', ''))[:150]
+    room = normalize_cell_value(request.form.get('room', ''))[:60]
+    content = normalize_cell_value(request.form.get('content', ''))[:600]
+    if not content:
+        content = ' | '.join([part for part in [subject, teacher_name, room] if part])[:600]
+
+    lesson = ScheduleLesson(
+        week_id=active_week.id,
+        sheet_name=sheet_name[:50] or 'ОБЩЕЕ',
+        group_name=group_name[:60],
+        day_name=day_name[:20] or 'Понедельник',
+        pair_number=min(7, max(1, pair_number)),
+        time_range=time_range or PAIR_TIME_RANGES.get(min(7, max(1, pair_number)), 'Время уточняется'),
+        subject=subject,
+        teacher_name=teacher_name,
+        room=room,
+        content=content or '—',
+        content_half_1='',
+        content_half_2=''
+    )
+    db.session.add(lesson)
+    db.session.commit()
+    log_audit('create_schedule_lesson', f'lesson_id={lesson.id}, group={lesson.group_name}')
+    flash('Занятие добавлено')
+    return redirect(url_for('schedule_page', group_name=lesson.group_name, sheet=lesson.sheet_name, group='all'))
+
+
+@app.route('/admin/schedule/lesson/<int:lesson_id>/delete', methods=['POST'])
+@login_required
+def admin_delete_schedule_lesson(lesson_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    lesson = db.session.get(ScheduleLesson, lesson_id)
+    if not lesson:
+        flash('Занятие не найдено')
+        return redirect(url_for('schedule_page'))
+
+    group_name = lesson.group_name
+    sheet_name = lesson.sheet_name
+    db.session.delete(lesson)
+    db.session.commit()
+    log_audit('delete_schedule_lesson', f'lesson_id={lesson_id}')
+    flash('Занятие удалено')
+    return redirect(url_for('schedule_page', group_name=group_name, sheet=sheet_name, group='all'))
+
+
+@app.route('/admin/schedule/group/add', methods=['POST'])
+@login_required
+def admin_add_schedule_group():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    active_week = get_active_schedule_week()
+    if not active_week:
+        flash('Сначала загрузите Excel, чтобы создать активную неделю')
+        return redirect(url_for('admin_dashboard'))
+
+    group_name = normalize_cell_value(request.form.get('group_name', '')).upper()
+    sheet_name = normalize_cell_value(request.form.get('sheet_name', 'ОБЩЕЕ'))
+    if not group_name:
+        flash('Введите название группы')
+        return redirect(url_for('schedule_page'))
+
+    exists = ScheduleLesson.query.filter_by(week_id=active_week.id, group_name=group_name).first()
+    if exists:
+        flash('Такая группа уже есть в расписании')
+        return redirect(url_for('schedule_page', group_name=group_name, sheet=sheet_name, group='all'))
+
+    for day_name in DAY_NAMES:
+        for pair_number in range(1, 8):
+            db.session.add(ScheduleLesson(
+                week_id=active_week.id,
+                sheet_name=sheet_name[:50] or 'ОБЩЕЕ',
+                group_name=group_name[:60],
+                day_name=day_name,
+                pair_number=pair_number,
+                time_range=PAIR_TIME_RANGES.get(pair_number, 'Время уточняется'),
+                subject='',
+                teacher_name='',
+                room='',
+                content='—',
+                content_half_1='',
+                content_half_2=''
+            ))
+
+    db.session.commit()
+    log_audit('add_schedule_group', f'group={group_name}, week_id={active_week.id}')
+    flash('Группа добавлена в расписание')
+    return redirect(url_for('schedule_page', group_name=group_name, sheet=sheet_name, group='all'))
+
+
+@app.route('/admin/schedule/group/delete', methods=['POST'])
+@login_required
+def admin_delete_schedule_group():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    active_week = get_active_schedule_week()
+    if not active_week:
+        flash('Активная неделя не найдена')
+        return redirect(url_for('schedule_page'))
+
+    group_name = normalize_cell_value(request.form.get('group_name', '')).upper()
+    if not group_name:
+        flash('Укажите группу для удаления')
+        return redirect(url_for('schedule_page'))
+
+    deleted = ScheduleLesson.query.filter_by(week_id=active_week.id, group_name=group_name).delete()
+    db.session.commit()
+    log_audit('delete_schedule_group', f'group={group_name}, deleted={deleted}')
+    flash(f'Группа {group_name} удалена из расписания ({deleted} записей)')
+    return redirect(url_for('schedule_page', group='all'))
+
+
+@app.route('/health')
+def healthcheck():
+    return {'status': 'ok', 'service': 'studenthubik'}, 200
+
+
+@app.route('/ready')
+def readiness_check():
+    try:
+        db.session.execute(text('SELECT 1'))
+        return {'status': 'ready', 'database': 'ok'}, 200
+    except Exception as error:
+        app.logger.exception('readiness_check_failed: %s', error)
+        return {'status': 'not_ready', 'database': 'error'}, 503
+
+
+@app.route('/status')
+@login_required
+def status_page():
+    latest_audit = AuditLog.query.order_by(AuditLog.created_at.desc()).first()
+    return render_template(
+        'status.html',
+        app_status='online',
+        db_status='ok',
+        latest_audit=latest_audit,
+        latest_schedule=get_latest_schedule_file()
+    )
+
+
 @app.route('/student')
 @login_required
 def student_dashboard():
+    if current_user.role != 'student':
+        return redirect_to_role_dashboard()
+
+    period = request.args.get('period', 'all')
+    semester_filter = request.args.get('semester', 'all')
+    page = request.args.get('page', 1, type=int)
+
+    grades_query = Grade.query.filter_by(student_id=current_user.id)
+    grades_query = apply_period_filter(grades_query, period)
+    semester_value = resolve_semester_filter(semester_filter)
+    if semester_value:
+        grades_query = grades_query.filter(Grade.semester == semester_value)
+    grades = grades_query.order_by(Grade.graded_at.desc(), Grade.id.desc()).all()
+
+    grade_values = [grade.grade for grade in grades if isinstance(grade.grade, (int, float))]
+    average_grade = round(sum(grade_values) / len(grade_values), 2) if grade_values else 0
+    all_student_grades = Grade.query.filter_by(student_id=current_user.id).all()
+    semester_stats = get_semester_averages(all_student_grades)
+    subject_count = len({grade.subject_id for grade in grades})
+    best_grade = max(grade_values) if grade_values else '—'
+    worst_grade = min(grade_values) if grade_values else '—'
+    new_grades_count = len([
+        grade for grade in grades
+        if grade.graded_at and grade.graded_at >= datetime.utcnow() - timedelta(days=7)
+    ])
+    risk_level = 'Низкий риск'
+    if isinstance(average_grade, (int, float)):
+        if average_grade < 3.2:
+            risk_level = 'Зона риска'
+        elif average_grade < 4:
+            risk_level = 'Нужно подтянуть'
+
+    progress_points = build_student_progress_points(grades)
+    progress_delta = 0
+    progress_trend = 'Стабильно'
+    if len(progress_points) >= 2:
+        progress_delta = round(progress_points[-1]['avg'] - progress_points[-2]['avg'], 2)
+        if progress_delta > 0:
+            progress_trend = 'Прогресс'
+        elif progress_delta < 0:
+            progress_trend = 'Регресс'
+
+    subject_averages = (
+        db.session.query(Subject.name, func.round(func.avg(Grade.grade), 2), func.count(Grade.id))
+        .join(Grade, Grade.subject_id == Subject.id)
+        .filter(Grade.student_id == current_user.id)
+    )
+    subject_averages = apply_period_filter(subject_averages, period)
+    if semester_value:
+        subject_averages = subject_averages.filter(Grade.semester == semester_value)
+    subject_averages = subject_averages.group_by(Subject.id, Subject.name).order_by(Subject.name).all()
+
+    rows = build_student_subject_grade_rows(grades)
+    subject_grade_rows, total_subject_rows, subject_pages, page = paginate_items(rows, page, 8)
+
+    group_name = '—'
+    if current_user.group_id:
+        group = Group.query.get(current_user.group_id)
+        if group:
+            group_name = group.name
+
+    return render_template(
+        'student_dashboard.html',
+        grades=grades,
+        average_grade=average_grade,
+        subject_count=subject_count,
+        best_grade=best_grade,
+        worst_grade=worst_grade,
+        group_name=group_name,
+        subject_averages=subject_averages,
+        subject_grade_rows=subject_grade_rows,
+        period=period,
+        semester_filter=semester_filter,
+        semester_stats=semester_stats,
+        progress_points=progress_points,
+        new_grades_count=new_grades_count,
+        risk_level=risk_level,
+        progress_delta=progress_delta,
+        progress_trend=progress_trend,
+        page=page,
+        subject_pages=subject_pages,
+        total_subject_rows=total_subject_rows
+    )
+
+
+@app.route('/student/export-grades')
+@login_required
+def export_student_grades():
+    if current_user.role != 'student':
+        return redirect_to_role_dashboard()
+
     grades = Grade.query.filter_by(student_id=current_user.id).all()
-    return render_template('student_dashboard.html', grades=grades)
+
+    stream = io.StringIO()
+    writer = csv.writer(stream, delimiter=';')
+    writer.writerow(['subject', 'grade_or_mark', 'semester', 'graded_at'])
+    for item in grades:
+        writer.writerow([item.subject.name, (item.mark or item.grade), item.semester, item.graded_at.isoformat() if item.graded_at else ''])
+
+    return Response(
+        '\ufeff' + stream.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=my_grades.csv'}
+    )
+
 
 @app.route('/teacher', methods=['GET', 'POST'])
 @login_required
 def teacher_dashboard():
     if current_user.role != 'teacher':
-        return redirect('/dashboard')
+        return redirect_to_role_dashboard()
 
-    students = User.query.filter_by(role='student').all()
-    subjects = Subject.query.filter_by(teacher_id=current_user.id).all()
+    students = User.query.filter_by(role='student', is_verified=True).order_by(User.name).all()
+    groups_by_id = {group.id: group.name for group in Group.query.all()}
+    subjects = Subject.query.filter_by(teacher_id=current_user.id).order_by(Subject.name).all()
+    period = request.args.get('period', 'all')
+    semester_filter = request.args.get('semester', 'all')
+    semester_value = resolve_semester_filter(semester_filter)
+    search_query = request.args.get('q', '').strip()
+    page = request.args.get('page', 1, type=int)
+
+    # Journal controls
+    selected_group = request.args.get('journal_group', '').strip().upper()
+    selected_subject_id = request.args.get('journal_subject_id', type=int)
+    journal_month_raw = request.args.get('journal_month', datetime.utcnow().strftime('%Y-%m'))
+    try:
+        journal_year, journal_month = [int(x) for x in journal_month_raw.split('-', 1)]
+        month_start = datetime(journal_year, journal_month, 1)
+    except Exception:
+        month_start = datetime(datetime.utcnow().year, datetime.utcnow().month, 1)
+        journal_year, journal_month = month_start.year, month_start.month
+        journal_month_raw = f'{journal_year:04d}-{journal_month:02d}'
+
+    if journal_month == 12:
+        month_end = datetime(journal_year + 1, 1, 1)
+    else:
+        month_end = datetime(journal_year, journal_month + 1, 1)
+    days_in_month = (month_end - month_start).days
 
     if request.method == 'POST':
-        grade = Grade(
-            student_id=request.form['student_id'],
-            subject_id=request.form['subject_id'],
-            grade=request.form['value']  # <-- исправлено
+        action = request.form.get('action')
+
+        if action in {'create_grade', 'update_grade'}:
+            student_id = request.form.get('student_id')
+            subject_id = request.form.get('subject_id')
+            grade_value = request.form.get('value')
+            semester = request.form.get('semester', '1')
+            comment = request.form.get('comment', '').strip()
+            graded_at_raw = request.form.get('graded_at', '').strip()
+
+            if not student_id or not subject_id or grade_value is None:
+                flash('Заполните все поля для выставления оценки')
+                return redirect(url_for('teacher_dashboard'))
+
+            student = User.query.filter_by(id=student_id, role='student', is_verified=True).first()
+            subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
+            if not student or not subject:
+                flash('Выбраны некорректные студент или предмет')
+                return redirect(url_for('teacher_dashboard'))
+
+            numeric_grade, mark = normalize_grade_input(grade_value)
+            if numeric_grade == 'invalid':
+                flash('Оценка должна быть 1-5 или Н')
+                return redirect(url_for('teacher_dashboard'))
+
+            if semester not in {'1', '2'}:
+                flash('Семестр должен быть 1 или 2')
+                return redirect(url_for('teacher_dashboard'))
+
+            graded_at = datetime.utcnow()
+            if graded_at_raw:
+                try:
+                    graded_at = datetime.strptime(graded_at_raw, '%Y-%m-%d')
+                except ValueError:
+                    pass
+
+            if action == 'create_grade':
+                grade_item = Grade(
+                    student_id=student.id,
+                    subject_id=subject.id,
+                    grade=numeric_grade if isinstance(numeric_grade, int) else None,
+                    mark=mark or '',
+                    comment=comment[:300],
+                    semester=int(semester),
+                    graded_at=graded_at
+                )
+                db.session.add(grade_item)
+                db.session.commit()
+                create_notification(student.id, 'Новая отметка', f'По предмету {subject.name} выставлена отметка {(mark or numeric_grade)}.')
+                db.session.commit()
+                log_audit('create_grade', f'grade_id={grade_item.id}, student={student.id}, subject={subject.id}')
+                flash('Отметка добавлена')
+                return redirect(url_for('teacher_dashboard'))
+
+            grade_id = request.form.get('grade_id')
+            try:
+                grade_id = int(grade_id)
+            except (TypeError, ValueError):
+                flash('Некорректная оценка')
+                return redirect(url_for('teacher_dashboard'))
+
+            grade_item = Grade.query.join(Subject).filter(Grade.id == grade_id, Subject.teacher_id == current_user.id).first()
+            if not grade_item:
+                flash('Оценка не найдена или недоступна')
+                return redirect(url_for('teacher_dashboard'))
+
+            grade_item.grade = numeric_grade if isinstance(numeric_grade, int) else None
+            grade_item.mark = mark or ''
+            grade_item.comment = comment[:300]
+            grade_item.semester = int(semester)
+            grade_item.graded_at = graded_at
+            db.session.commit()
+            log_audit('update_grade', f'grade_id={grade_id}, value={mark or numeric_grade}')
+            flash('Отметка обновлена')
+            return redirect(url_for('teacher_dashboard'))
+
+        if action == 'delete_grade':
+            grade_id = request.form.get('grade_id')
+            try:
+                grade_id = int(grade_id)
+            except (TypeError, ValueError):
+                flash('Некорректная оценка')
+                return redirect(url_for('teacher_dashboard'))
+            grade_item = Grade.query.join(Subject).filter(Grade.id == grade_id, Subject.teacher_id == current_user.id).first()
+            if not grade_item:
+                flash('Оценка не найдена или недоступна')
+                return redirect(url_for('teacher_dashboard'))
+            db.session.delete(grade_item)
+            db.session.commit()
+            log_audit('delete_grade', f'grade_id={grade_id}')
+            flash('Отметка удалена')
+            return redirect(url_for('teacher_dashboard'))
+
+        if action == 'save_journal_month':
+            group_name = normalize_cell_value(request.form.get('journal_group', '')).upper()
+            subject_id = request.form.get('journal_subject_id', type=int)
+            journal_month_post = request.form.get('journal_month', journal_month_raw)
+            try:
+                y, m = [int(x) for x in journal_month_post.split('-', 1)]
+                ms = datetime(y, m, 1)
+            except Exception:
+                ms = month_start
+            me = datetime(ms.year + (1 if ms.month == 12 else 0), 1 if ms.month == 12 else ms.month + 1, 1)
+            dim = (me - ms).days
+
+            subject = Subject.query.filter_by(id=subject_id, teacher_id=current_user.id).first()
+            if not group_name or not subject:
+                flash('Для журнала выберите группу и предмет')
+                return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=journal_month_post, group='all'))
+
+            journal_students = [s for s in students if s.group_id and groups_by_id.get(s.group_id, '').upper() == group_name]
+            partial_save = request.form.get('journal_partial_save') == '1'
+            changed_field_names = {
+                field_name for field_name in request.form.get('journal_changed_fields', '').split(',') if field_name
+            } if partial_save else None
+            updated = 0
+            for student in journal_students:
+                for day in range(1, dim + 1):
+                    key = f'cell_{student.id}_{day}'
+                    comment_key = f'comment_{student.id}_{day}'
+                    if changed_field_names is not None and key not in changed_field_names and comment_key not in changed_field_names:
+                        continue
+                    raw_value = request.form.get(key, '').strip()
+                    raw_comment = request.form.get(comment_key, '').strip()
+                    target_dt = datetime(ms.year, ms.month, day, 12, 0, 0)
+
+                    existing = Grade.query.filter(
+                        Grade.student_id == student.id,
+                        Grade.subject_id == subject.id,
+                        func.date(Grade.graded_at) == target_dt.date().isoformat()
+                    ).first()
+
+                    if not raw_value:
+                        if existing and not raw_comment:
+                            db.session.delete(existing)
+                            updated += 1
+                        elif existing and (existing.comment != raw_comment):
+                            existing.comment = raw_comment[:300]
+                            updated += 1
+                        continue
+
+                    numeric_grade, mark = normalize_grade_input(raw_value)
+                    if numeric_grade == 'invalid':
+                        continue
+
+                    if existing:
+                        existing.grade = numeric_grade if isinstance(numeric_grade, int) else None
+                        existing.mark = mark or ''
+                        existing.comment = raw_comment[:300]
+                        existing.graded_at = target_dt
+                        updated += 1
+                    else:
+                        db.session.add(Grade(
+                            student_id=student.id,
+                            subject_id=subject.id,
+                            grade=numeric_grade if isinstance(numeric_grade, int) else None,
+                            mark=mark or '',
+                            comment=raw_comment[:300],
+                            semester=1 if ms.month <= 6 else 2,
+                            graded_at=target_dt
+                        ))
+                        updated += 1
+
+            db.session.commit()
+            log_audit('save_journal_month', f'group={group_name}, subject={subject_id}, month={journal_month_post}, updated={updated}')
+            flash(f'Журнал сохранён, обновлено ячеек: {updated}')
+            return redirect(url_for('teacher_dashboard', journal_group=group_name, journal_subject_id=subject_id, journal_month=journal_month_post, group='all'))
+
+        flash('Некорректное действие')
+        return redirect(url_for('teacher_dashboard'))
+
+    recent_grades_query = Grade.query.join(Subject).join(User, Grade.student_id == User.id).filter(Subject.teacher_id == current_user.id)
+    recent_grades_query = apply_period_filter(recent_grades_query, period)
+    if semester_value:
+        recent_grades_query = recent_grades_query.filter(Grade.semester == semester_value)
+    if search_query:
+        recent_grades_query = recent_grades_query.filter((User.name.ilike(f'%{search_query}%')) | (Subject.name.ilike(f'%{search_query}%')) | (Grade.comment.ilike(f'%{search_query}%')))
+
+    total_recent_grades = recent_grades_query.count()
+    per_page = 20
+    recent_grades = recent_grades_query.order_by(Grade.graded_at.desc(), Grade.id.desc()).offset((max(page, 1) - 1) * per_page).limit(per_page).all()
+    total_pages = max(1, (total_recent_grades + per_page - 1) // per_page)
+
+    subject_averages = dict(db.session.query(Subject.id, func.round(func.avg(Grade.grade), 2)).outerjoin(Grade, Grade.subject_id == Subject.id).filter(Subject.teacher_id == current_user.id).group_by(Subject.id).all())
+
+    all_teacher_grades = Grade.query.join(Subject).filter(Subject.teacher_id == current_user.id).all()
+    teacher_stats = get_semester_averages(all_teacher_grades)
+
+    student_rankings = []
+    for student in students:
+        student_grades = (
+            Grade.query.join(Subject)
+            .filter(Subject.teacher_id == current_user.id, Grade.student_id == student.id)
+            .order_by(Grade.graded_at.asc(), Grade.id.asc())
+            .all()
         )
-        db.session.add(grade)
-        db.session.commit()
+        numeric = [g.grade for g in student_grades if isinstance(g.grade, (int, float))]
+        if not numeric:
+            continue
+        avg = round(sum(numeric) / len(numeric), 2)
+        trend = 'Стабильно'
+        delta = 0
+        if len(numeric) >= 2:
+            delta = round(numeric[-1] - numeric[-2], 2)
+            if delta > 0:
+                trend = 'Прогресс'
+            elif delta < 0:
+                trend = 'Регресс'
+        student_rankings.append({
+            'id': student.id,
+            'name': student.name,
+            'group_name': groups_by_id.get(student.group_id, '—'),
+            'avg': avg,
+            'delta': delta,
+            'trend': trend,
+            'count': len(numeric),
+            'progress_percent': max(0, min(100, round((avg / 5) * 100, 1)))
+        })
+
+    student_rankings = sorted(student_rankings, key=lambda row: (-row['avg'], row['name'].lower()))
+
+    # Journal data
+    group_names = sorted({groups_by_id.get(student.group_id, '').upper() for student in students if student.group_id and groups_by_id.get(student.group_id)})
+    if not selected_group and group_names:
+        selected_group = group_names[0]
+
+    journal_students = [s for s in students if s.group_id and groups_by_id.get(s.group_id, '').upper() == selected_group] if selected_group else []
+    if not selected_subject_id and subjects:
+        selected_subject_id = subjects[0].id
+
+    journal_subject = next((subj for subj in subjects if subj.id == selected_subject_id), None)
+    journal_entries = {}
+    journal_comments = {}
+    journal_status = {}
+    journal_summary = {'students': len(journal_students), 'avg': 0, 'absences': 0, 'filled_cells': 0, 'fill_rate': 0}
+    if journal_subject and journal_students:
+        entries = Grade.query.filter(
+            Grade.subject_id == journal_subject.id,
+            Grade.student_id.in_([s.id for s in journal_students]),
+            Grade.graded_at >= month_start,
+            Grade.graded_at < month_end
+        ).order_by(Grade.graded_at.asc(), Grade.id.asc()).all()
+
+        for item in entries:
+            day = item.graded_at.day if item.graded_at else 1
+            key = (item.student_id, day)
+            display_value = item.mark if item.mark else (str(item.grade) if item.grade is not None else '')
+            journal_entries[key] = display_value
+            journal_comments[key] = item.comment or ''
+
+        total_numeric = []
+        total_absences = 0
+        for student in journal_students:
+            st_entries = [entry for entry in entries if entry.student_id == student.id]
+            n_count = len([e for e in st_entries if (e.mark or '').upper() == 'Н'])
+            numeric = [e.grade for e in st_entries if isinstance(e.grade, (int, float))]
+            avg = round(sum(numeric) / len(numeric), 2) if numeric else 0
+            total_numeric.extend(numeric)
+            total_absences += n_count
+            journal_status[student.id] = {
+                'n_count': n_count,
+                'avg': avg,
+                'na': (n_count > len(numeric)) or (numeric and avg < 2.5)
+            }
+
+        filled_cells = len(entries)
+        total_cells = len(journal_students) * days_in_month if journal_students else 0
+        journal_summary = {
+            'students': len(journal_students),
+            'avg': round(sum(total_numeric) / len(total_numeric), 2) if total_numeric else 0,
+            'absences': total_absences,
+            'filled_cells': filled_cells,
+            'fill_rate': round((filled_cells / total_cells) * 100, 1) if total_cells else 0,
+        }
+
+    curator_group_name = groups_by_id.get(current_user.group_id, '') if current_user.group_id else ''
+    curator_student_count = User.query.filter_by(role='student', is_verified=True, group_id=current_user.group_id).count() if current_user.group_id else 0
+    curator_recent_grades = []
+    if current_user.group_id:
+        curator_student_ids = [row[0] for row in db.session.query(User.id).filter_by(role='student', is_verified=True, group_id=current_user.group_id).all()]
+        if curator_student_ids:
+            curator_recent_grades = (
+                Grade.query.join(Subject).join(User, User.id == Grade.student_id)
+                .filter(Grade.student_id.in_(curator_student_ids))
+                .order_by(Grade.graded_at.desc(), Grade.id.desc())
+                .limit(80)
+                .all()
+            )
 
     return render_template(
         'teacher_dashboard.html',
         students=students,
-        subjects=subjects
+        subjects=subjects,
+        recent_grades=recent_grades,
+        groups_by_id=groups_by_id,
+        subject_averages=subject_averages,
+        period=period,
+        semester_filter=semester_filter,
+        search_query=search_query,
+        teacher_stats=teacher_stats,
+        student_rankings=student_rankings,
+        page=page,
+        total_pages=total_pages,
+        total_recent_grades=total_recent_grades,
+        group_names=group_names,
+        selected_group=selected_group,
+        selected_subject_id=selected_subject_id,
+        journal_subject=journal_subject,
+        journal_month=journal_month_raw,
+        days_in_month=days_in_month,
+        journal_students=journal_students,
+        journal_entries=journal_entries,
+        journal_comments=journal_comments,
+        journal_status=journal_status,
+        journal_summary=journal_summary,
+        curator_group_name=curator_group_name,
+        curator_student_count=curator_student_count,
+        curator_recent_grades=curator_recent_grades,
     )
 
+
+@app.route('/teacher/curator-report')
+@login_required
+def export_curator_report():
+    if current_user.role != 'teacher' or not current_user.group_id:
+        return redirect_to_role_dashboard()
+
+    report_period = request.args.get('period', 'month')
+    now = datetime.utcnow()
+    if report_period == 'semester':
+        start_month = 1 if now.month <= 6 else 7
+        start_at = datetime(now.year, start_month, 1)
+        title = 'semester'
+    else:
+        start_at = datetime(now.year, now.month, 1)
+        title = 'month'
+
+    students_in_group = User.query.filter_by(role='student', is_verified=True, group_id=current_user.group_id).order_by(User.name).all()
+    student_ids = [student.id for student in students_in_group]
+    grades = []
+    if student_ids:
+        grades = (
+            Grade.query.join(Subject)
+            .filter(Grade.student_id.in_(student_ids), Grade.graded_at >= start_at)
+            .order_by(Grade.student_id, Subject.name, Grade.graded_at)
+            .all()
+        )
+
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(['student', 'subject', 'grade_or_mark', 'semester', 'comment', 'graded_at'])
+    students_by_id = {student.id: student.name for student in students_in_group}
+    for item in grades:
+        writer.writerow([
+            students_by_id.get(item.student_id, '—'),
+            item.subject.name if item.subject else '—',
+            item.mark or item.grade or '',
+            item.semester,
+            item.comment or '',
+            item.graded_at.isoformat() if item.graded_at else ''
+        ])
+
+    curator_group = Group.query.get(current_user.group_id)
+    group_name = curator_group.name if curator_group else 'group'
+    return Response(
+        '\ufeff' + stream.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename=curator_{group_name}_{title}.csv'}
+    )
+
+
+@app.route('/teacher/export-grades')
+@login_required
+def export_teacher_grades():
+    if current_user.role != 'teacher':
+        return redirect_to_role_dashboard()
+
+    grades = (
+        Grade.query.join(Subject)
+        .filter(Subject.teacher_id == current_user.id)
+        .order_by(Grade.id.desc())
+        .all()
+    )
+
+    stream = io.StringIO()
+    writer = csv.writer(stream, delimiter=';')
+    writer.writerow(['student', 'subject', 'grade_or_mark', 'semester', 'comment', 'graded_at'])
+    for item in grades:
+        writer.writerow([item.student.name, item.subject.name, (item.mark or item.grade), item.semester, item.comment or '', item.graded_at.isoformat() if item.graded_at else ''])
+
+    return Response(
+        '\ufeff' + stream.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=teacher_grades.csv'}
+    )
+
+
+@app.route('/admin')
+@login_required
+def admin_dashboard():
+    if current_user.role not in {'admin', 'curator'}:
+        return redirect(url_for('dashboard'))
+
+    query = request.args.get('q', '').strip()
+    role_filter = request.args.get('role', 'all')
+    status_filter = request.args.get('status', 'pending')
+    group_filter = request.args.get('group_id', 'all')
+
+    users_query = User.query.filter(User.role.in_(['student', 'teacher']))
+    if query:
+        users_query = users_query.filter((User.name.ilike(f'%{query}%')) | (User.email.ilike(f'%{query}%')))
+    if role_filter in {'student', 'teacher'}:
+        users_query = users_query.filter(User.role == role_filter)
+    if status_filter == 'pending':
+        users_query = users_query.filter(User.is_verified.is_(False))
+    elif status_filter == 'approved':
+        users_query = users_query.filter(User.is_verified.is_(True))
+
+    if group_filter != 'all':
+        try:
+            group_id = int(group_filter)
+            users_query = users_query.filter(User.group_id == group_id)
+        except ValueError:
+            pass
+
+    page = request.args.get('page', 1, type=int)
+    per_page = 30
+    total_filtered = users_query.count()
+    filtered_users = users_query.order_by(User.id.desc()).offset((max(page, 1) - 1) * per_page).limit(per_page).all()
+
+    pending_teachers = [u for u in filtered_users if u.role == 'teacher' and not u.is_verified]
+    pending_students = [u for u in filtered_users if u.role == 'student' and not u.is_verified]
+
+    approved_teachers = [u for u in filtered_users if u.role == 'teacher' and u.is_verified]
+    approved_students = [u for u in filtered_users if u.role == 'student' and u.is_verified]
+    all_approved_teachers = User.query.filter_by(role='teacher', is_verified=True).order_by(User.name).all()
+    total_pages = max(1, (total_filtered + per_page - 1) // per_page)
+
+    all_groups = Group.query.order_by(Group.name).all()
+    all_subjects = Subject.query.order_by(Subject.name).all()
+    recent_audit = AuditLog.query.order_by(AuditLog.id.desc()).limit(40).all()
+    latest_schedule = get_latest_schedule_file()
+    active_week = get_active_schedule_week()
+    total_users_count = User.query.filter(User.role.in_(['student', 'teacher'])).count()
+    verified_users_count = User.query.filter(User.role.in_(['student', 'teacher']), User.is_verified.is_(True)).count()
+    approval_rate = round((verified_users_count / total_users_count) * 100, 1) if total_users_count else 0
+    active_schedule_groups = []
+    active_schedule_sheets = []
+    if active_week:
+        active_schedule_groups = [row[0] for row in db.session.query(ScheduleLesson.group_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.group_name).all()]
+        active_schedule_sheets = [row[0] for row in db.session.query(ScheduleLesson.sheet_name).filter_by(week_id=active_week.id).distinct().order_by(ScheduleLesson.sheet_name).all()]
+
+    curator_assignments = [
+        {
+            'teacher': teacher,
+            'group_name': groups_by_id.get(teacher.group_id, '—'),
+            'student_count': User.query.filter_by(role='student', is_verified=True, group_id=teacher.group_id).count() if teacher.group_id else 0
+        }
+        for teacher in all_approved_teachers if teacher.group_id
+    ]
+
+    return render_template(
+        'admin_dashboard.html',
+        pending_teachers=pending_teachers,
+        pending_students=pending_students,
+        approved_teachers=approved_teachers,
+        all_approved_teachers=all_approved_teachers,
+        approved_students=approved_students,
+        groups_by_id={group.id: group.name for group in all_groups},
+        query=query,
+        role_filter=role_filter,
+        status_filter=status_filter,
+        group_filter=group_filter,
+        all_groups=all_groups,
+        all_subjects=all_subjects,
+        recent_audit=recent_audit,
+        latest_schedule=latest_schedule,
+        active_week=active_week,
+        active_schedule_groups=active_schedule_groups,
+        active_schedule_sheets=active_schedule_sheets,
+        can_manage=current_user.role == 'admin',
+        page=page,
+        total_pages=total_pages,
+        total_filtered=total_filtered,
+        total_users_count=total_users_count,
+        verified_users_count=verified_users_count,
+        approval_rate=approval_rate,
+        curator_assignments=curator_assignments
+    )
+
+
+@app.route('/admin/users/bulk-action', methods=['POST'])
+@login_required
+def admin_bulk_user_action():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    redirect_params = {
+        'q': request.form.get('q', ''),
+        'role': request.form.get('role', 'all'),
+        'status': request.form.get('status', 'pending'),
+        'group_id': request.form.get('group_id', 'all')
+    }
+
+    action = request.form.get('bulk_action')
+    selected_ids = request.form.getlist('selected_user_ids')
+    if action not in {'approve', 'reject'}:
+        flash('Некорректное массовое действие')
+        return redirect(url_for('admin_dashboard', **redirect_params))
+
+    valid_ids = []
+    for user_id in selected_ids:
+        try:
+            valid_ids.append(int(user_id))
+        except ValueError:
+            continue
+
+    if not valid_ids:
+        flash('Выберите хотя бы одну заявку')
+        return redirect(url_for('admin_dashboard', **redirect_params))
+
+    users = User.query.filter(User.id.in_(valid_ids), User.role.in_(['student', 'teacher'])).all()
+    processed = 0
+
+    if action == 'approve':
+        for user in users:
+            user.is_verified = True
+            processed += 1
+            log_audit('approve_user_bulk', f'id={user.id}, role={user.role}', should_commit=False)
+        db.session.commit()
+        flash(f'Одобрено заявок: {processed}')
+        return redirect(url_for('admin_dashboard', **redirect_params))
+
+    for user in users:
+        Grade.query.filter_by(student_id=user.id).delete()
+        if user.role == 'teacher':
+            teacher_subject_ids = [s.id for s in Subject.query.filter_by(teacher_id=user.id).all()]
+            if teacher_subject_ids:
+                Grade.query.filter(Grade.subject_id.in_(teacher_subject_ids)).delete(synchronize_session=False)
+                Subject.query.filter_by(teacher_id=user.id).delete()
+
+        db.session.delete(user)
+        processed += 1
+        log_audit('reject_user_bulk', f'id={user.id}, role={user.role}', should_commit=False)
+
+    db.session.commit()
+    flash(f'Отклонено и удалено заявок: {processed}')
+    return redirect(url_for('admin_dashboard', **redirect_params))
+
+
+@app.route('/admin/user/<int:user_id>/approve', methods=['POST'])
+@login_required
+def approve_user(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    user = User.query.filter(User.id == user_id, User.role.in_(['student', 'teacher'])).first()
+    if not user:
+        flash('Пользователь не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    user.is_verified = True
+    db.session.commit()
+
+    log_audit('approve_user', f'id={user.id}, role={user.role}')
+    flash(f'Пользователь {user.name} одобрен')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/user/action', methods=['POST'])
+@login_required
+def admin_user_action():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    user_id = request.form.get('user_id')
+    action = request.form.get('action')
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        flash('Некорректный пользователь')
+        return redirect(url_for('admin_dashboard'))
+
+    user = User.query.filter(User.id == user_id, User.role.in_(['student', 'teacher'])).first()
+    if not user:
+        flash('Пользователь не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    if action == 'approve':
+        user.is_verified = True
+        db.session.commit()
+        log_audit('approve_user', f'id={user.id}, role={user.role}')
+        flash(f'Пользователь {user.name} одобрен')
+        return redirect(url_for('admin_dashboard'))
+
+    if action == 'reject':
+        Grade.query.filter_by(student_id=user.id).delete()
+        if user.role == 'teacher':
+            teacher_subject_ids = [s.id for s in Subject.query.filter_by(teacher_id=user.id).all()]
+            if teacher_subject_ids:
+                Grade.query.filter(Grade.subject_id.in_(teacher_subject_ids)).delete(synchronize_session=False)
+                Subject.query.filter_by(teacher_id=user.id).delete()
+
+        db.session.delete(user)
+        db.session.commit()
+        log_audit('reject_user', f'id={user_id}')
+        flash('Заявка отклонена и аккаунт удалён')
+        return redirect(url_for('admin_dashboard'))
+
+    flash('Некорректное действие')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/user/<int:user_id>/reject', methods=['POST'])
+@login_required
+def reject_user(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    user = User.query.filter(User.id == user_id, User.role.in_(['student', 'teacher'])).first()
+    if not user:
+        flash('Пользователь не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    Grade.query.filter_by(student_id=user.id).delete()
+    if user.role == 'teacher':
+        teacher_subject_ids = [s.id for s in Subject.query.filter_by(teacher_id=user.id).all()]
+        if teacher_subject_ids:
+            Grade.query.filter(Grade.subject_id.in_(teacher_subject_ids)).delete(synchronize_session=False)
+            Subject.query.filter_by(teacher_id=user.id).delete()
+
+    db.session.delete(user)
+    db.session.commit()
+    log_audit('reject_user', f'id={user_id}')
+    flash('Заявка отклонена и аккаунт удалён')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/curator/assign', methods=['POST'])
+@login_required
+def admin_assign_curator():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    teacher_id = request.form.get('teacher_id', type=int)
+    group_id = request.form.get('group_id', type=int)
+    teacher = User.query.filter_by(id=teacher_id, role='teacher', is_verified=True).first()
+    group = Group.query.get(group_id) if group_id else None
+    if not teacher or not group:
+        flash('Выберите преподавателя и группу для назначения куратора')
+        return redirect(url_for('admin_dashboard', status='approved', role='teacher'))
+
+    teacher.group_id = group.id
+    db.session.commit()
+    log_audit('assign_curator', f'teacher={teacher.id}, group={group.name}')
+    flash(f'{teacher.name} назначен куратором группы {group.name}')
+    return redirect(url_for('admin_dashboard', status='approved', role='teacher'))
+
+
+@app.route('/admin/user/<int:user_id>/password', methods=['POST'])
+@login_required
+def admin_reset_user_password(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    user = User.query.filter(User.id == user_id, User.role.in_(['student', 'teacher'])).first()
+    new_password = request.form.get('new_password', '')
+    if not user:
+        flash('Пользователь не найден')
+        return redirect(url_for('admin_dashboard', status='approved'))
+    if len(new_password) < 6:
+        flash('Новый пароль должен быть не короче 6 символов')
+        return redirect(url_for('admin_dashboard', status='approved', role=user.role))
+
+    user.password = generate_password_hash(new_password)
+    db.session.commit()
+    log_audit('admin_reset_password', f'user={user.id}, role={user.role}')
+    flash(f'Пароль пользователя {user.name} обновлён')
+    return redirect(url_for('admin_dashboard', status='approved', role=user.role))
+
+
+@app.route('/admin/user/<int:user_id>/update', methods=['POST'])
+@login_required
+def admin_update_user(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    user = User.query.filter(User.id == user_id, User.role.in_(['student', 'teacher'])).first()
+    if not user:
+        flash('Пользователь не найден')
+        return redirect(url_for('admin_dashboard', status='approved'))
+
+    name = request.form.get('name', '').strip()
+    email = request.form.get('email', '').strip().lower()
+    username = normalize_login(request.form.get('username', getattr(user, 'username', '') or ''))
+    telegram = request.form.get('telegram', '').strip()
+
+    if not full_name_looks_valid(name):
+        flash('Введите полное ФИО пользователя')
+        return redirect(url_for('admin_dashboard', status='approved'))
+    if not email_looks_valid(email):
+        flash('Введите корректный email пользователя')
+        return redirect(url_for('admin_dashboard', status='approved'))
+    if not login_looks_valid(username):
+        flash('Введите корректный логин пользователя')
+        return redirect(url_for('admin_dashboard', status='approved'))
+
+    existing_login = User.query.filter(User.username == username, User.id != user.id).first()
+    if existing_login:
+        flash('Такой логин уже занят')
+        return redirect(url_for('admin_dashboard', status='approved'))
+
+    existing = User.query.filter(User.email == email, User.id != user.id).first()
+    if existing:
+        flash('Такой email уже занят другим пользователем')
+        return redirect(url_for('admin_dashboard', status='approved'))
+
+    user.name = name
+    user.email = email
+    user.username = username
+    user.telegram = telegram
+
+    if user.role in {'student', 'teacher'}:
+        group_id_raw = request.form.get('group_id', '')
+        try:
+            group_id = int(group_id_raw) if group_id_raw else None
+        except ValueError:
+            group_id = None
+        if group_id and Group.query.get(group_id):
+            user.group_id = group_id
+        elif not group_id:
+            user.group_id = None
+
+    db.session.commit()
+    log_audit('admin_update_user', f'id={user.id}, role={user.role}')
+    flash(f'Данные пользователя {user.name} обновлены')
+    return redirect(url_for('admin_dashboard', status='approved', role=user.role))
+
+
+@app.route('/admin/student/<int:user_id>/delete', methods=['POST'])
+@login_required
+def admin_delete_student(user_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    student = User.query.filter_by(id=user_id, role='student').first()
+    if not student:
+        flash('Студент не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    Grade.query.filter_by(student_id=student.id).delete()
+    db.session.delete(student)
+    db.session.commit()
+    log_audit('delete_student', f'id={user_id}')
+    flash('Аккаунт студента удалён')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/group', methods=['POST'])
+@login_required
+def admin_add_group():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    group_name = normalize_group_name(request.form.get('group_name', ''))
+    if not group_name:
+        flash('Введите название группы')
+        return redirect(url_for('admin_dashboard'))
+
+    if Group.query.filter_by(name=group_name).first():
+        flash('Такая группа уже существует')
+        return redirect(url_for('admin_dashboard'))
+
+    db.session.add(Group(name=group_name))
+    db.session.commit()
+    log_audit('add_group', group_name)
+    flash(f'Группа {group_name} добавлена')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/group/<int:group_id>/delete', methods=['POST'])
+@login_required
+def admin_delete_group(group_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    group = Group.query.get(group_id)
+    if not group:
+        flash('Группа не найдена')
+        return redirect(url_for('admin_dashboard'))
+
+    students_with_group = User.query.filter_by(role='student', group_id=group.id).count()
+    if students_with_group > 0:
+        flash('Нельзя удалить группу: в ней есть студенты')
+        return redirect(url_for('admin_dashboard'))
+
+    db.session.delete(group)
+    db.session.commit()
+    log_audit('delete_group', f'id={group_id}')
+    flash('Группа удалена')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/teacher/<int:teacher_id>/subject', methods=['POST'])
+@login_required
+def admin_add_subject_for_teacher(teacher_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    teacher = User.query.filter_by(id=teacher_id, role='teacher').first()
+    if not teacher:
+        flash('Преподаватель не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    subject_name = request.form.get('subject_name', '').strip()
+    if not subject_name:
+        flash('Введите название предмета')
+        return redirect(url_for('admin_dashboard'))
+
+    if Subject.query.filter_by(name=subject_name, teacher_id=teacher.id).first():
+        flash('У преподавателя уже есть такой предмет')
+        return redirect(url_for('admin_dashboard'))
+
+    db.session.add(Subject(name=subject_name, teacher_id=teacher.id))
+    db.session.commit()
+    log_audit('add_subject', f'teacher={teacher.id}, subject={subject_name}')
+    flash(f'Предмет {subject_name} назначен преподавателю {teacher.name}')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/subject/<int:subject_id>/delete', methods=['POST'])
+@login_required
+def admin_delete_subject(subject_id):
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    subject = Subject.query.get(subject_id)
+    if not subject:
+        flash('Предмет не найден')
+        return redirect(url_for('admin_dashboard'))
+
+    Grade.query.filter_by(subject_id=subject.id).delete()
+    db.session.delete(subject)
+    db.session.commit()
+    log_audit('delete_subject', f'id={subject_id}')
+    flash('Предмет удалён')
+    return redirect(url_for('admin_dashboard'))
+
+
+
+
+@app.route('/admin/backup-db')
+@login_required
+def admin_backup_db():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not db_uri.startswith('sqlite:///'):
+        flash('Автобэкап доступен только для SQLite в этой сборке')
+        return redirect(url_for('admin_dashboard'))
+
+    source_rel = db_uri.replace('sqlite:///', '', 1)
+    source_path = os.path.join(app.root_path, source_rel)
+    if not os.path.exists(source_path):
+        source_path = os.path.join(app.instance_path, 'site.db')
+
+    backup_dir = os.path.join(app.instance_path, 'backups')
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    backup_name = f'site_{stamp}.db'
+    backup_path = os.path.join(backup_dir, backup_name)
+    shutil.copy2(source_path, backup_path)
+    log_audit('backup_db', f'file={backup_name}')
+
+    return send_from_directory(backup_dir, backup_name, as_attachment=True)
+
+
+@app.route('/admin/export-users')
+@login_required
+def export_all_users():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    users = User.query.order_by(User.id).all()
+
+    stream = io.StringIO()
+    writer = csv.writer(stream, delimiter=';')
+    writer.writerow(['id', 'name', 'email', 'role', 'group_id', 'is_verified'])
+    for user in users:
+        writer.writerow([user.id, user.name, user.email, user.role, user.group_id or '', user.is_verified])
+
+    return Response(
+        '\ufeff' + stream.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=all_users.csv'}
+    )
+
+
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline';"
+    return response
+
+
+@app.errorhandler(400)
+def bad_request(_error):
+    return render_template('error_400.html'), 400
+
+
+@app.errorhandler(404)
+def not_found(_error):
+    return render_template('error_404.html'), 404
+
+
+@app.errorhandler(500)
+def server_error(error):
+    app.logger.exception('server_error: %s', error)
+    return render_template('error_500.html'), 500
+
+
 if __name__ == '__main__':
-    app.run(debug=True)
-
-
+    if not app.debug:
+        log_handler = RotatingFileHandler('app.log', maxBytes=1024 * 1024, backupCount=3)
+        log_handler.setLevel(logging.INFO)
+        log_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+        if not app.logger.handlers:
+            app.logger.addHandler(log_handler)
+    app.logger.setLevel(logging.INFO)
+    port = int(os.getenv('PORT', '5000'))
+    debug_enabled = app.config.get('ENVIRONMENT') != 'production'
+    app.run(host='0.0.0.0', port=port, debug=debug_enabled)

@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set page_safe = page|default(1) %}
+{% set total_pages_safe = total_pages|default(1) %}
+{% set query_safe = query|default('') %}
+{% set role_filter_safe = role_filter|default('all') %}
+{% set status_filter_safe = status_filter|default('pending') %}
+{% set group_filter_safe = group_filter|default('all') %}
+{% set can_manage_safe = can_manage|default(false) %}
+
+<h1 class="page-title">Админ-панель</h1>
+{% if not can_manage_safe %}<p class="muted-text" style="margin-bottom:12px;">Режим куратора: доступ только для просмотра.</p>{% endif %}
+
+<div class="dashboard-actions admin-sticky-actions">
+    <a href="{{ url_for('export_all_users') }}" class="btn">Экспорт всех пользователей (CSV)</a>
+    {% if can_manage_safe %}<a href="{{ url_for('admin_backup_db') }}" class="btn" style="margin-left:8px;">Скачать бэкап БД</a>{% endif %}
+    <button id="adminCollapseAll" type="button" class="btn secondary-btn">Свернуть разделы</button>
+    <button id="adminExpandAll" type="button" class="btn secondary-btn">Раскрыть всё</button>
+</div>
+
+<section class="card admin-guide-card" style="margin-bottom:18px;">
+    <h2 style="margin-bottom:10px;">Что где находится</h2>
+    <div class="admin-guide-grid">
+        <div><strong>Кураторы</strong><span>Назначаются отдельным блоком ниже: выберите преподавателя + группу и нажмите «Назначить».</span></div>
+        <div><strong>Студенты</strong><span>Можно менять ФИО, email, группу, контакт, пароль и удалять аккаунт.</span></div>
+        <div><strong>Преподаватели</strong><span>Можно менять данные, пароль, кураторскую группу и предметы.</span></div>
+        <div><strong>Разделы</strong><span>Каждый большой блок сворачивается, чтобы админ-панель не превращалась в бесконечную простыню.</span></div>
+    </div>
+</section>
+
+{% if total_pages_safe > 1 %}<div class="pager" style="margin-bottom:12px;">{% for p in range(1, total_pages_safe + 1) %}<a class="pager-link{% if p == page_safe %} active{% endif %}" href="{{ url_for('admin_dashboard', q=query_safe, role=role_filter_safe, status=status_filter_safe, group_id=group_filter_safe, page=p) }}">{{ p }}</a>{% endfor %}</div>{% endif %}
+
+
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Расписание колледжа</h2>
+    {% if latest_schedule %}
+        <p class="muted-text" style="margin-bottom:10px;">Текущий файл: <strong>{{ latest_schedule.original_name }}</strong> ({{ latest_schedule.uploaded_at.strftime('%d.%m.%Y %H:%M') }})</p>
+        <a href="{{ url_for('download_schedule', file_id=latest_schedule.id) }}" class="btn" style="margin-bottom:12px;">Скачать текущее расписание</a>
+    {% else %}
+        <p class="muted-text" style="margin-bottom:10px;">Расписание ещё не загружено.</p>
+    {% endif %}
+
+    {% if can_manage_safe %}
+    <form method="POST" action="{{ url_for('admin_upload_schedule') }}" enctype="multipart/form-data" style="max-width:520px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="field-label" for="schedule_file">Загрузить Excel-расписание (.xls / .xlsx)</label>
+        <input id="schedule_file" type="file" name="schedule_file" class="input-field" required>
+        <button class="btn" type="submit">Обновить расписание</button>
+    </form>
+    {% if latest_schedule %}
+    <form method="POST" action="{{ url_for('admin_reparse_latest_schedule') }}" style="margin-top:8px;max-width:520px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn" type="submit">Повторно обработать последний Excel (исправить парсинг)</button>
+    </form>
+    {% endif %}
+    {% endif %}
+
+    {% if active_week %}
+        <p class="muted-text" style="margin-top:10px;">Опубликовано: <strong>{{ active_week.title }}</strong>. Групп: {{ active_schedule_groups|length }}, вкладок: {{ active_schedule_sheets|length }}.</p>
+        <a href="{{ url_for('schedule_page') }}" class="btn" style="margin-top:8px;">Открыть красивый просмотр расписания</a>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Поиск и фильтры</h2>
+    <form method="GET" action="{{ url_for('admin_dashboard') }}" class="grade-form">
+        <label class="field-label" for="q">Поиск по ФИО / email</label>
+        <input id="q" type="text" name="q" class="input-field" value="{{ query_safe }}" placeholder="Введите ФИО или email">
+
+        <label class="field-label" for="role">Роль</label>
+        <select id="role" name="role" class="input-field">
+            <option value="all" {% if role_filter_safe == 'all' %}selected{% endif %}>Все</option>
+            <option value="student" {% if role_filter_safe == 'student' %}selected{% endif %}>Студенты</option>
+            <option value="teacher" {% if role_filter_safe == 'teacher' %}selected{% endif %}>Преподаватели</option>
+        </select>
+
+        <label class="field-label" for="status">Статус заявки</label>
+        <select id="status" name="status" class="input-field">
+            <option value="pending" {% if status_filter_safe == 'pending' %}selected{% endif %}>Ожидают одобрения</option>
+            <option value="approved" {% if status_filter_safe == 'approved' %}selected{% endif %}>Одобренные</option>
+            <option value="all" {% if status_filter_safe == 'all' %}selected{% endif %}>Все</option>
+        </select>
+
+        <label class="field-label" for="group_id">Группа (для студентов)</label>
+        <select id="group_id" name="group_id" class="input-field">
+            <option value="all" {% if group_filter_safe == 'all' %}selected{% endif %}>Все группы</option>
+            {% for group in all_groups %}
+            <option value="{{ group.id }}" {% if group_filter_safe == group.id|string %}selected{% endif %}>{{ group.name }}</option>
+            {% endfor %}
+        </select>
+
+        <button class="btn" type="submit">Применить фильтры</button>
+    </form>
+</section>
+
+{% set persist = {'q': query_safe, 'role': role_filter_safe, 'status': status_filter_safe, 'group_id': group_filter_safe} %}
+
+<div class="card-grid">
+    <div class="card"><div class="card-title">Новые студенты</div><div class="card-value">{{ pending_students|length }}</div></div>
+    <div class="card"><div class="card-title">Новые преподаватели</div><div class="card-value">{{ pending_teachers|length }}</div></div>
+    <div class="card"><div class="card-title">Одобренных студентов</div><div class="card-value">{{ approved_students|length }}</div></div>
+    <div class="card"><div class="card-title">Одобренных преподавателей</div><div class="card-value">{{ approved_teachers|length }}</div></div>
+    <div class="card"><div class="card-title">Всего пользователей</div><div class="card-value">{{ total_users_count|default(0) }}</div></div>
+    <div class="card"><div class="card-title">Процент одобрения</div><div class="card-value">{{ approval_rate|default(0) }}%</div></div>
+</div>
+
+<section class="card curator-admin-card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:10px;">Назначение кураторов групп</h2>
+    <p class="muted-text" style="margin-bottom:12px;">Куратор — это преподаватель, который видит ведомость всей своей группы по всем предметам и скачивает отчёты за месяц/семестр.</p>
+    {% if can_manage_safe %}
+    <form method="POST" action="{{ url_for('admin_assign_curator') }}" class="admin-curator-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div>
+            <label class="field-label">1. Преподаватель</label>
+            <select name="teacher_id" class="input-field" required>
+                {% for teacher in all_approved_teachers %}<option value="{{ teacher.id }}">{{ teacher.name }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="field-label">2. Группа</label>
+            <select name="group_id" class="input-field" required>
+                {% for group in all_groups %}<option value="{{ group.id }}">{{ group.name }}</option>{% endfor %}
+            </select>
+        </div>
+        <button class="btn" type="submit">Назначить куратора</button>
+    </form>
+    {% endif %}
+    {% if curator_assignments %}
+    <div class="table-wrap" style="margin-top:12px;">
+        <table class="grade-table solid-table">
+            <thead><tr><th>Куратор</th><th>Группа</th><th>Студентов</th></tr></thead>
+            <tbody>{% for item in curator_assignments %}<tr><td>{{ item.teacher.name }}</td><td>{{ item.group_name }}</td><td>{{ item.student_count }}</td></tr>{% endfor %}</tbody>
+        </table>
+    </div>
+    {% else %}<p class="muted-text" style="margin-top:10px;">Кураторы пока не назначены.</p>{% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:10px;">Шкала модерации</h2>
+    <div class="student-rating-scale" aria-label="Шкала процента одобренных пользователей">
+        <div class="student-rating-fill" style="width: {{ approval_rate|default(0) }}%;"></div>
+    </div>
+    <p class="muted-text" style="margin-top:8px;">Одобрено: {{ verified_users_count|default(0) }} из {{ total_users_count|default(0) }}.</p>
+</section>
+
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:10px;">Операционные алерты</h2>
+    <ul class="alerts-list">
+        <li class="alert-item {% if pending_students|length > 20 %}alert-item-danger{% endif %}">Новые заявки студентов: <strong>{{ pending_students|length }}</strong></li>
+        <li class="alert-item {% if pending_teachers|length > 10 %}alert-item-danger{% endif %}">Новые заявки преподавателей: <strong>{{ pending_teachers|length }}</strong></li>
+        <li class="alert-item {% if approval_rate|default(0) < 60 %}alert-item-warn{% endif %}">Процент одобрения: <strong>{{ approval_rate|default(0) }}%</strong></li>
+        <li class="alert-item">Пользователей в выборке: <strong>{{ total_filtered|default(0) }}</strong></li>
+    </ul>
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Управление группами</h2>
+    <form method="POST" action="{{ url_for('admin_add_group') }}" style="margin-bottom:14px;max-width:500px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="group_name" class="input-field" placeholder="Новая группа (например ИС24-01/2)" required>
+        {% if can_manage_safe %}<button class="btn" type="submit">Добавить группу</button>{% endif %}
+    </form>
+
+    {% if all_groups %}
+        <div class="table-wrap">
+            <table class="grade-table">
+                <thead><tr><th>Группа</th><th>Действие</th></tr></thead>
+                <tbody>
+                    {% for group in all_groups %}
+                    <tr>
+                        <td>{{ group.name }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin_delete_group', group_id=group.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                {% if can_manage_safe %}<button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>{% endif %}
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Заявки студентов</h2>
+    {% if pending_students and can_manage_safe %}
+        <form method="POST" action="{{ url_for('admin_bulk_user_action') }}" style="margin-bottom: 12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="q" value="{{ persist.q }}">
+            <input type="hidden" name="role" value="{{ persist.role }}">
+            <input type="hidden" name="status" value="{{ persist.status }}">
+            <input type="hidden" name="group_id" value="{{ persist.group_id }}">
+            <div style="display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px;">
+                <button class="btn" type="submit" name="bulk_action" value="approve">Одобрить выбранные</button>
+                <button class="btn" type="submit" name="bulk_action" value="reject" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить выбранные</button>
+            </div>
+            <div class="table-wrap">
+                <table class="grade-table">
+                    <thead><tr><th><input type="checkbox" id="select-all-students"></th><th>ФИО</th><th>Email</th><th>Группа</th></tr></thead>
+                    <tbody>
+                        {% for user in pending_students %}
+                        <tr>
+                            <td><input type="checkbox" class="pending-student-checkbox" name="selected_user_ids" value="{{ user.id }}"></td>
+                            <td>{{ user.name }}</td>
+                            <td>{{ user.email }}</td>
+                            <td>{{ groups_by_id.get(user.group_id, '—') if user.group_id else '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+    {% else %}
+        <p class="muted-text">Нет новых заявок студентов.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Заявки преподавателей</h2>
+    {% if pending_teachers and can_manage_safe %}
+        <form method="POST" action="{{ url_for('admin_bulk_user_action') }}" style="margin-bottom: 12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="q" value="{{ persist.q }}">
+            <input type="hidden" name="role" value="{{ persist.role }}">
+            <input type="hidden" name="status" value="{{ persist.status }}">
+            <input type="hidden" name="group_id" value="{{ persist.group_id }}">
+            <div style="display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px;">
+                <button class="btn" type="submit" name="bulk_action" value="approve">Одобрить выбранные</button>
+                <button class="btn" type="submit" name="bulk_action" value="reject" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Отклонить выбранные</button>
+            </div>
+            <div class="table-wrap">
+                <table class="grade-table">
+                    <thead><tr><th><input type="checkbox" id="select-all-teachers"></th><th>ФИО</th><th>Email</th></tr></thead>
+                    <tbody>
+                        {% for user in pending_teachers %}
+                        <tr>
+                            <td><input type="checkbox" class="pending-teacher-checkbox" name="selected_user_ids" value="{{ user.id }}"></td>
+                            <td>{{ user.name }}</td>
+                            <td>{{ user.email }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+    {% else %}
+        <p class="muted-text">Нет новых заявок преподавателей.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Одобренные преподаватели: предметы под контролем админа</h2>
+    {% for teacher in approved_teachers %}
+        <div class="card" style="margin-bottom:14px;padding:18px;">
+            <h3 style="margin-bottom:8px;">{{ teacher.name }} ({{ teacher.email }})</h3>
+            <form method="POST" action="{{ url_for('admin_add_subject_for_teacher', teacher_id=teacher.id) }}" style="max-width:500px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="text" name="subject_name" class="input-field" placeholder="Добавить предмет преподавателю" required>
+                <button class="btn" type="submit">Добавить предмет</button>
+            </form>
+        </div>
+    {% endfor %}
+
+    {% if all_subjects %}
+        <div class="table-wrap">
+            <table class="grade-table">
+                <thead><tr><th>Предмет</th><th>ID препода</th><th>Действие</th></tr></thead>
+                <tbody>
+                    {% for subject in all_subjects %}
+                    <tr>
+                        <td>{{ subject.name }}</td>
+                        <td>{{ subject.teacher_id }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin_delete_subject', subject_id=subject.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить предмет</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:14px;">Все одобренные студенты (с удалением аккаунта)</h2>
+    {% if approved_students %}
+        <div class="table-wrap">
+            <table class="grade-table">
+                <thead><tr><th>ФИО</th><th>Логин / Email</th><th>Группа</th><th>Действие</th></tr></thead>
+                <tbody>
+                    {% for student in approved_students %}
+                    <tr>
+                        <td><input form="student-update-{{ student.id }}" type="text" name="name" class="input-field admin-inline-input" value="{{ student.name }}" required></td>
+                        <td>
+                            <input form="student-update-{{ student.id }}" type="text" name="username" class="input-field admin-inline-input" value="{{ student.username or '' }}" placeholder="Логин" required>
+                            <input form="student-update-{{ student.id }}" type="email" name="email" class="input-field admin-inline-input" value="{{ student.email }}" placeholder="Email" required>
+                        </td>
+                        <td>
+                            <select form="student-update-{{ student.id }}" name="group_id" class="input-field admin-inline-input">
+                                <option value="">Без группы</option>
+                                {% for group in all_groups %}<option value="{{ group.id }}" {% if student.group_id == group.id %}selected{% endif %}>{{ group.name }}</option>{% endfor %}
+                            </select>
+                            <input form="student-update-{{ student.id }}" type="text" name="telegram" class="input-field admin-inline-input" value="{{ student.telegram or '' }}" placeholder="Контакт">
+                        </td>
+                        <td>
+                            <form id="student-update-{{ student.id }}" method="POST" action="{{ url_for('admin_update_user', user_id=student.id) }}" style="display:inline-block;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="btn" type="submit">Сохранить</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('admin_reset_user_password', user_id=student.id) }}" class="admin-password-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <input type="text" name="new_password" class="input-field admin-inline-input" placeholder="Новый пароль" minlength="6" required>
+                                <button class="btn secondary-btn" type="submit">Сменить пароль</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('admin_delete_student', user_id=student.id) }}" style="display:inline-block;margin-left:6px;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="btn" type="submit" style="background:linear-gradient(90deg,#b91c1c,#ef4444);">Удалить</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted-text">Пока нет одобренных студентов.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-top:24px;">
+    <h2 style="margin-bottom:14px;">Журнал действий (аудит)</h2>
+    {% if recent_audit %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead><tr><th>ID</th><th>Кто</th><th>Действие</th><th>Детали</th></tr></thead>
+            <tbody>
+                {% for item in recent_audit %}
+                <tr>
+                    <td>{{ item.id }}</td>
+                    <td>{{ item.actor.name if item.actor else 'Система/Гость' }}</td>
+                    <td>{{ item.action }}</td>
+                    <td>{{ item.details }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p class="muted-text">Логов пока нет.</p>
+    {% endif %}
+</section>
+
+<section class="card" style="margin-top:24px;">
+    <h2 style="margin-bottom:14px;">Все одобренные преподаватели</h2>
+    {% if approved_teachers %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead><tr><th>ФИО</th><th>Логин / Email</th><th>Контакт / кураторство</th><th>Действие</th></tr></thead>
+            <tbody>
+            {% for teacher in approved_teachers %}
+                <tr>
+                    <td><input form="teacher-update-{{ teacher.id }}" type="text" name="name" class="input-field admin-inline-input" value="{{ teacher.name }}" required></td>
+                    <td>
+                    <input form="teacher-update-{{ teacher.id }}" type="text" name="username" class="input-field admin-inline-input" value="{{ teacher.username or '' }}" placeholder="Логин" required>
+                    <input form="teacher-update-{{ teacher.id }}" type="email" name="email" class="input-field admin-inline-input" value="{{ teacher.email }}" placeholder="Email" required>
+                    </td>
+                    <td>
+                        <input form="teacher-update-{{ teacher.id }}" type="text" name="telegram" class="input-field admin-inline-input" value="{{ teacher.telegram or '' }}" placeholder="Контакт">
+                        <select form="teacher-update-{{ teacher.id }}" name="group_id" class="input-field admin-inline-input" title="Кураторская группа">
+                            <option value="">Не куратор</option>
+                            {% for group in all_groups %}<option value="{{ group.id }}" {% if teacher.group_id == group.id %}selected{% endif %}>Куратор {{ group.name }}</option>{% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <form id="teacher-update-{{ teacher.id }}" method="POST" action="{{ url_for('admin_update_user', user_id=teacher.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="btn" type="submit">Сохранить</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('admin_reset_user_password', user_id=teacher.id) }}" class="admin-password-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="text" name="new_password" class="input-field admin-inline-input" placeholder="Новый пароль" minlength="6" required>
+                            <button class="btn secondary-btn" type="submit">Сменить пароль</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="muted-text">Нет одобренных преподавателей.</p>
+    {% endif %}
+</section>
+
+<script>
+function toggleAll(masterId, itemsSelector) {
+    const master = document.getElementById(masterId);
+    if (!master) return;
+    master.addEventListener('change', () => {
+        document.querySelectorAll(itemsSelector).forEach((item) => {
+            item.checked = master.checked;
+        });
+    });
+}
+
+toggleAll('select-all-students', '.pending-student-checkbox');
+toggleAll('select-all-teachers', '.pending-teacher-checkbox');
+
+(function () {
+    const sections = Array.from(document.querySelectorAll('section.card'));
+    sections.forEach((section, index) => {
+        const title = section.querySelector('h2');
+        if (!title) return;
+        section.classList.add('admin-collapsible-card');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'admin-section-toggle';
+        button.textContent = 'Свернуть';
+        title.appendChild(button);
+        const saved = localStorage.getItem(`admin_section_${index}`);
+        if (saved === 'closed') {
+            section.classList.add('collapsed');
+            button.textContent = 'Раскрыть';
+        }
+        button.addEventListener('click', () => {
+            const collapsed = section.classList.toggle('collapsed');
+            button.textContent = collapsed ? 'Раскрыть' : 'Свернуть';
+            localStorage.setItem(`admin_section_${index}`, collapsed ? 'closed' : 'open');
+        });
+    });
+
+    document.getElementById('adminCollapseAll')?.addEventListener('click', () => {
+        sections.forEach((section, index) => {
+            section.classList.add('collapsed');
+            const button = section.querySelector('.admin-section-toggle');
+            if (button) button.textContent = 'Раскрыть';
+            localStorage.setItem(`admin_section_${index}`, 'closed');
+        });
+    });
+    document.getElementById('adminExpandAll')?.addEventListener('click', () => {
+        sections.forEach((section, index) => {
+            section.classList.remove('collapsed');
+            const button = section.querySelector('.admin-section-toggle');
+            if (button) button.textContent = 'Свернуть';
+            localStorage.setItem(`admin_section_${index}`, 'open');
+        });
+    });
+})();
+</script>
+
+{% endblock %}

@@ -1,24 +1,71 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="max-width:500px;margin:auto;margin-top:100px;">
-    <h1 class="page-title">Создать аккаунт</h1>
+<div class="auth-wrapper">
+    <div class="auth-card">
 
-    <form method="POST">
-        {{ form.hidden_tag() }}
+        <div class="auth-header">
+            <a href="{{ url_for('index') }}" class="auth-logo-link" aria-label="На главную">
+                <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik">
+            </a>
+            <h1>Регистрация</h1>
+            <p>Введите реальные данные для модерации админом</p>
+        </div>
 
-        {{ form.username(class="input-field", placeholder="Имя") }}
-        {{ form.email(class="input-field", placeholder="Email") }}
-        {{ form.password(class="input-field", placeholder="Пароль") }}
-        {{ form.confirm_password(class="input-field", placeholder="Подтвердите пароль") }}
+        <form method="POST" id="register-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="text" name="name" class="input-field" placeholder="ФИО полностью" required>
+            <input type="text" name="username" class="input-field" placeholder="Логин для входа (например ivanov_23)" pattern="[a-z0-9_.-]{3,50}" title="3-50 символов: латиница, цифры, точка, подчёркивание или дефис" autocomplete="username" required>
+            <input type="email" name="email" class="input-field" placeholder="Email для восстановления пароля" required>
 
-        <button type="submit" class="btn" style="width:100%;">Зарегистрироваться</button>
-    </form>
+            <div class="password-field-wrap">
+                <input id="register-password" type="password" name="password" class="input-field" placeholder="Пароль" minlength="6" required>
+                <button type="button" class="ghost-btn toggle-password" data-target="register-password">Показать</button>
+            </div>
 
-    <p style="margin-top:20px;text-align:center;">
-        Уже есть аккаунт?
-        <a href="{{ url_for('login') }}" style="color:#c084fc;">Войти</a>
-    </p>
+            <div class="password-field-wrap">
+                <input id="register-confirm-password" type="password" name="confirm_password" class="input-field" placeholder="Повторите пароль" minlength="6" required>
+                <button type="button" class="ghost-btn toggle-password" data-target="register-confirm-password">Показать</button>
+            </div>
+
+            <select name="role" id="role-select" class="input-field" required>
+                <option value="" disabled selected>Выберите роль</option>
+                <option value="student">Студент</option>
+                <option value="teacher">Преподаватель</option>
+            </select>
+
+            <input type="text" name="group_name" id="group-name" class="input-field hidden" list="group-list" placeholder="Начните вводить группу...">
+            <datalist id="group-list">
+                {% for group in groups %}
+                    <option value="{{ group.name }}"></option>
+                {% endfor %}
+            </datalist>
+
+            <button type="submit" class="btn auth-btn">Зарегистрироваться</button>
+        </form>
+
+        <div class="auth-footer">
+            <span>Уже есть аккаунт?</span>
+            <a href="{{ url_for('login') }}">Войти</a>
+        </div>
+
+    </div>
 </div>
+
+<script>
+const roleSelect = document.getElementById('role-select');
+const groupInput = document.getElementById('group-name');
+
+roleSelect.addEventListener('change', () => {
+    if (roleSelect.value === 'student') {
+        groupInput.classList.remove('hidden');
+        groupInput.required = true;
+    } else {
+        groupInput.classList.add('hidden');
+        groupInput.required = false;
+        groupInput.value = '';
+    }
+});
+</script>
 
 {% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1 class="page-title">Помощь и поддержка</h1>
+
+<section class="card" style="max-width:760px;">
+    <h2 style="margin-bottom:12px;">Связь с поддержкой</h2>
+    <p class="muted-text" style="margin-bottom:16px;">Если возникли вопросы по входу, ролям, оценкам или заявкам — выберите удобный канал связи.</p>
+
+    <div class="support-channel-grid">
+        <a href="{{ support_telegram }}" target="_blank" rel="noopener" class="btn">Telegram: {{ support_username }}</a>
+        {% if support_email %}<a href="mailto:{{ support_email }}" class="btn secondary-btn">Email: {{ support_email }}</a>{% endif %}
+        {% if support_vk %}<a href="{{ support_vk }}" target="_blank" rel="noopener" class="btn secondary-btn">VK</a>{% endif %}
+        {% if support_whatsapp %}<a href="{{ support_whatsapp }}" target="_blank" rel="noopener" class="btn secondary-btn">WhatsApp</a>{% endif %}
+    </div>
+
+    <hr style="border-color:rgba(255,255,255,0.12);margin:18px 0;">
+    <h3 style="margin-bottom:8px;">Частые вопросы</h3>
+    <ul style="line-height:1.8;opacity:0.9;padding-left:18px;">
+        <li>Заявки студентов и преподавателей одобряет админ в админ-панели.</li>
+        <li>Если не получается войти — проверьте роль на экране входа.</li>
+        <li>Преподаватель видит только предметы, назначенные администратором.</li>
+    </ul>
+</section>
+
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Статус системы</h1>
+
+<div class="card-grid">
+    <div class="card"><div class="card-title">Приложение</div><div class="card-value">{{ app_status }}</div></div>
+    <div class="card"><div class="card-title">База данных</div><div class="card-value">{{ db_status }}</div></div>
+    <div class="card"><div class="card-title">Последняя активность</div><div class="card-value">{{ latest_audit.created_at.strftime('%d.%m %H:%M') if latest_audit else '—' }}</div></div>
+</div>
+
+<section class="card" style="margin-top:14px;">
+    <h2>Последние обновления</h2>
+    {% if latest_audit %}
+        <p><strong>{{ latest_audit.action }}</strong></p>
+        <p class="muted-text">{{ latest_audit.details or 'Без деталей' }}</p>
+    {% else %}
+        <p class="muted-text">Записи аудита пока отсутствуют.</p>
+    {% endif %}
+
+    {% if latest_schedule %}
+        <p style="margin-top:10px;" class="muted-text">Актуальное расписание: {{ latest_schedule.original_name }}</p>
+    {% endif %}
+</section>
+{% endblock %}

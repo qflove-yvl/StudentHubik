@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Расписание</h1>
+
+<section class="card" style="margin-bottom:24px;">
+    {% if latest_schedule %}
+        <p class="muted-text">Актуальный файл: <strong>{{ latest_schedule.original_name }}</strong></p>
+        <p class="muted-text">Загружено: {{ latest_schedule.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</p>
+        {% if active_week %}
+            <p class="muted-text">Опубликованный период: <strong>{{ active_week.title }}</strong></p>
+        {% endif %}
+        <a class="btn" href="{{ url_for('download_schedule', file_id=latest_schedule.id) }}">Скачать исходный Excel</a>
+    {% else %}
+        <p class="muted-text">Файл расписания пока не загружен администратором.</p>
+    {% endif %}
+</section>
+
+{% if active_week %}
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:12px;">Фильтр расписания</h2>
+    <form method="GET" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
+        <div>
+            <label class="field-label" for="sheet">Отделение / вкладка</label>
+            <select id="sheet" name="sheet" class="input-field" style="margin:0;min-width:180px;">
+                <option value="all" {% if selected_sheet == 'all' %}selected{% endif %}>Все вкладки</option>
+                {% for sheet in all_sheets %}
+                    <option value="{{ sheet }}" {% if selected_sheet == sheet %}selected{% endif %}>{{ sheet }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label class="field-label" for="group_mode">Как выбрать группу</label>
+            <select id="group_mode" name="group" class="input-field" style="margin:0;min-width:180px;">
+                <option value="my" {% if group_filter_mode == 'my' %}selected{% endif %}>Автоматически из профиля</option>
+                <option value="all" {% if group_filter_mode == 'all' %}selected{% endif %}>Ввести группу справа</option>
+            </select>
+        </div>
+
+        <div>
+            <label class="field-label" for="group_name">Группа</label>
+            <input id="group_name" list="groups-list" name="group_name" class="input-field" style="margin:0;min-width:190px;" value="{{ selected_group }}" placeholder="Например, МР25-01-1">
+            <datalist id="groups-list">
+                {% for item in all_groups %}<option value="{{ item }}">{% endfor %}
+            </datalist>
+        </div>
+
+        <button class="btn" type="submit">Показать</button>
+    </form>
+    {% if my_group %}
+        <p class="muted-text" style="margin-top:8px;">Ваша группа по профилю: <strong>{{ my_group }}</strong></p>
+    {% endif %}
+</section>
+
+{% if current_user.role == 'admin' %}
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:12px;">Полный контроль расписания (админ)</h2>
+    <div class="panel-grid">
+        <div class="card" style="padding:16px;">
+            <h3 style="margin-bottom:8px;">Добавить новую группу в неделю</h3>
+            <form method="POST" action="{{ url_for('admin_add_schedule_group') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="text" name="group_name" class="input-field" placeholder="Например, ИС24-01/2" required>
+                <input type="text" name="sheet_name" class="input-field" placeholder="Вкладка/специальность (например, ИС)" required>
+                <button class="btn" type="submit">Добавить группу</button>
+            </form>
+            <form method="POST" action="{{ url_for('admin_delete_schedule_group') }}" style="margin-top:10px;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="text" name="group_name" class="input-field" placeholder="Удалить группу из недели" required>
+                <button class="btn" style="background:linear-gradient(90deg,#b91c1c,#ef4444);" type="submit">Удалить группу</button>
+            </form>
+        </div>
+
+        <div class="card" style="padding:16px;">
+            <h3 style="margin-bottom:8px;">Добавить занятие вручную</h3>
+            <form method="POST" action="{{ url_for('admin_create_schedule_lesson') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="text" name="sheet_name" class="input-field" placeholder="Вкладка" required>
+                <input type="text" name="group_name" class="input-field" placeholder="Группа" required>
+                <input type="text" name="day_name" class="input-field" placeholder="День (Понедельник...)" required>
+                <input type="number" min="1" max="7" name="pair_number" class="input-field" placeholder="№ пары" required>
+                <input type="text" name="time_range" class="input-field" placeholder="08:15–09:40" required>
+                <input type="text" name="subject" class="input-field" placeholder="Предмет">
+                <input type="text" name="teacher_name" class="input-field" placeholder="Преподаватель">
+                <input type="text" name="room" class="input-field" placeholder="Кабинет">
+                <textarea name="content" class="input-field" rows="2" placeholder="Полный текст занятия (если нужно)"></textarea>
+                <button class="btn" type="submit">Добавить занятие</button>
+            </form>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+<section class="card" style="margin-bottom:24px;">
+    <h2 style="margin-bottom:12px;">Недельное расписание {% if selected_group %}— {{ selected_group }}{% endif %}</h2>
+    {% if selected_group %}
+        {% for day_name, items in schedule_grid.items() %}
+            <div class="schedule-day-block">
+                <h3 class="schedule-day-title">{{ day_name }}</h3>
+                {% if items %}
+                    <div class="table-wrap">
+                        <table class="grade-table">
+                            <thead>
+                                <tr>
+                                    <th>Пара</th><th>Время</th><th>Предмет</th><th>Преподаватель</th><th>Кабинет</th><th>Описание</th>
+                                    {% if current_user.role == 'admin' %}<th>Управление</th>{% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for lesson in items %}
+                                <tr>
+                                    <td>{{ lesson.pair_number }}</td>
+                                    <td>{{ lesson.time_range }}</td>
+                                    <td>{{ lesson.subject or '—' }}</td>
+                                    <td>{{ lesson.teacher_name or '—' }}</td>
+                                    <td>{{ lesson.room or '—' }}</td>
+                                    <td>{{ lesson.content }}</td>
+                                    {% if current_user.role == 'admin' %}
+                                    <td>
+                                        <form method="POST" action="{{ url_for('admin_edit_schedule_lesson', lesson_id=lesson.id) }}">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="text" name="sheet_name" class="input-field" style="margin:0;min-width:140px;" value="{{ lesson.sheet_name }}" placeholder="Вкладка">
+                                            <input type="text" name="group_name" class="input-field" style="margin-top:6px;min-width:140px;" value="{{ lesson.group_name }}" placeholder="Группа">
+                                            <input type="text" name="day_name" class="input-field" style="margin-top:6px;min-width:140px;" value="{{ lesson.day_name }}" placeholder="День">
+                                            <input type="number" min="1" max="7" name="pair_number" class="input-field" style="margin-top:6px;max-width:90px;" value="{{ lesson.pair_number }}">
+                                            <input type="text" name="time_range" class="input-field" style="margin-top:6px;min-width:120px;" value="{{ lesson.time_range }}">
+                                            <input type="text" name="subject" class="input-field" style="margin-top:6px;min-width:160px;" value="{{ lesson.subject or '' }}" placeholder="Предмет">
+                                            <input type="text" name="teacher_name" class="input-field" style="margin-top:6px;min-width:160px;" value="{{ lesson.teacher_name or '' }}" placeholder="Преподаватель">
+                                            <input type="text" name="room" class="input-field" style="margin-top:6px;min-width:120px;" value="{{ lesson.room or '' }}" placeholder="Кабинет">
+                                            <input type="text" name="content" class="input-field" style="margin-top:6px;min-width:260px;" value="{{ lesson.content }}" maxlength="600">
+                                            <button class="btn" style="margin-top:6px;" type="submit">Сохранить</button>
+                                        </form>
+                                        <form method="POST" action="{{ url_for('admin_delete_schedule_lesson', lesson_id=lesson.id) }}" style="margin-top:6px;">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <button class="btn" style="background:linear-gradient(90deg,#b91c1c,#ef4444);" type="submit">Удалить</button>
+                                        </form>
+                                    </td>
+                                    {% endif %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="muted-text">На этот день занятий нет.</p>
+                {% endif %}
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="muted-text">Выберите группу, чтобы показать расписание.</p>
+    {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+    <h2 style="margin-bottom:12px;">История файлов расписания</h2>
+    {% if schedule_history %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead><tr><th>Файл</th><th>Дата загрузки</th><th>Действие</th></tr></thead>
+            <tbody>
+                {% for item in schedule_history %}
+                <tr>
+                    <td>{{ item.original_name }}</td>
+                    <td>{{ item.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td><a class="btn" href="{{ url_for('download_schedule', file_id=item.id) }}">Скачать</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p class="muted-text">История пока пустая.</p>
+    {% endif %}
+</section>
+{% endblock %}

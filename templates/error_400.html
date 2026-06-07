@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card" style="max-width:720px;">
+  <h1 class="page-title">Некорректный запрос (400)</h1>
+  <p class="muted-text">Похоже, данные формы устарели или повреждены. Обновите страницу и попробуйте снова.</p>
+  <div style="margin-top:14px;"><a class="btn" href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('login') }}">Вернуться</a></div>
+</section>
+{% endblock %}

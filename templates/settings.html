@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set ui = ui_settings|default({'theme': 'dark', 'compact': 'off', 'animations': 'on'}) %}
+
+<h1 class="page-title">Настройки</h1>
+
+<div class="panel-grid">
+    <section class="card form-card">
+        <h2>Внешний вид</h2>
+        <form method="POST" id="settings-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token|default('') }}">
+
+            <label class="field-label" for="theme-select">Тема</label>
+            <select id="theme-select" name="theme" class="input-field">
+                <option value="dark" {% if ui.theme == 'dark' %}selected{% endif %}>Тёмная</option>
+                <option value="light" {% if ui.theme == 'light' %}selected{% endif %}>Светлая</option>
+            </select>
+
+            <label class="field-label" for="compact-select">Компактный режим</label>
+            <select id="compact-select" name="compact_mode" class="input-field">
+                <option value="off" {% if ui.compact == 'off' %}selected{% endif %}>Обычный</option>
+                <option value="on" {% if ui.compact == 'on' %}selected{% endif %}>Компактный</option>
+            </select>
+
+            <label class="field-label" for="animations-select">Анимации</label>
+            <select id="animations-select" name="animations_enabled" class="input-field">
+                <option value="on" {% if ui.animations == 'on' %}selected{% endif %}>Включены</option>
+                <option value="off" {% if ui.animations == 'off' %}selected{% endif %}>Выключены</option>
+            </select>
+
+            <button id="save-ui-settings" class="btn" type="submit">Сохранить настройки</button>
+            <p class="muted-text hint-text">Настройки сохраняются в аккаунте и применяются на всех ваших устройствах.</p>
+        </form>
+    </section>
+
+    <section class="card list-card">
+        <h2>Быстрые действия</h2>
+        <div class="quick-actions">
+            <a href="{{ url_for('profile') }}" class="btn">Изменить профиль</a>
+            <a href="{{ url_for('support') }}" class="btn">Связаться с поддержкой</a>
+            <a href="{{ url_for('dashboard') }}" class="btn">Вернуться в панель</a>
+        </div>
+
+        <div class="status-chip-grid" style="margin-top: 16px;">
+            <span class="status-chip">Роль: {{ current_user.role }}</span>
+            <span class="status-chip">Email: {{ current_user.email }}</span>
+            <span class="status-chip">Верификация: {{ 'Да' if current_user.is_verified else 'Нет' }}</span>
+        </div>
+    </section>
+</div>
+
+<script>
+(function () {
+    const root = document.documentElement;
+    const themeSelect = document.getElementById('theme-select');
+    const compactSelect = document.getElementById('compact-select');
+    const animationsSelect = document.getElementById('animations-select');
+
+    if (!themeSelect || !compactSelect || !animationsSelect) return;
+
+    const apply = () => {
+        root.setAttribute('data-theme', themeSelect.value);
+        root.setAttribute('data-compact', compactSelect.value);
+        root.setAttribute('data-animations', animationsSelect.value);
+    };
+
+    [themeSelect, compactSelect, animationsSelect].forEach((el) => {
+        el.addEventListener('change', () => {
+            apply();
+            try {
+                localStorage.setItem('studenthubik_theme', themeSelect.value);
+                localStorage.setItem('studenthubik_compact', compactSelect.value);
+                localStorage.setItem('studenthubik_animations', animationsSelect.value);
+            } catch (e) {}
+        });
+    });
+})();
+</script>
+
+{% endblock %}

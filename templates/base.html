@@ -1,80 +1,183 @@
 <!DOCTYPE html>
-<html lang="ru">
+{% set _ui = ui_settings|default({'theme': 'dark', 'compact': 'off', 'animations': 'on'}) %}
+{% set _csrf = csrf_token|default('') %}
+<html lang="ru" data-theme="{{ _ui.theme|default('dark') }}" data-compact="{{ _ui.compact|default('off') }}" data-animations="{{ _ui.animations|default('on') }}">
 <head>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-
-<style>
-body {
-    margin: 0;
-    font-family: 'Inter', sans-serif;
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    color: white;
-}
-
-.glass {
-    background: rgba(255,255,255,0.05);
-    backdrop-filter: blur(15px);
-    border-radius: 20px;
-    padding: 30px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-}
-
-.btn-modern {
-    padding: 12px 25px;
-    border-radius: 12px;
-    border: none;
-    font-weight: 600;
-    cursor: pointer;
-    background: linear-gradient(90deg,#6366f1,#8b5cf6);
-    color: white;
-    transition: all 0.3s ease;
-}
-
-.btn-modern:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 25px rgba(139,92,246,0.5);
-}
-</style>
 <meta charset="UTF-8">
-<title>StudentHubik</title>
+<title>{{ college_name|default('StudentHubik') }}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script>
+const APP_CSRF_TOKEN = {{ _csrf|tojson }};
+(function() {
+  try {
+    var theme = localStorage.getItem('studenthubik_theme') || {{ _ui.theme|default('dark')|tojson }};
+    var compact = localStorage.getItem('studenthubik_compact') || {{ _ui.compact|default('off')|tojson }};
+    var animations = localStorage.getItem('studenthubik_animations') || {{ _ui.animations|default('on')|tojson }};
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.setAttribute('data-compact', compact);
+    document.documentElement.setAttribute('data-animations', animations);
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 
 <div class="topbar">
     <div class="top-left">
-        <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo">
-        <span class="brand-name">StudentHubik</span>
+        <a href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('index') }}" class="top-logo-link" aria-label="На главную">
+            <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo" alt="StudentHubik">
+        </a>
     </div>
 
-    {% if current_user.is_authenticated %}
-    <div class="top-right">
-        <div class="user-avatar">
-            current_user.name
-        </div>
-        <span class="username">{{ current_user.name[0]|upper }}</span>
-        <a href="{{ url_for('logout') }}" class="logout-btn">Выйти</a>
+    <div class="top-center">
+        {% if current_user.is_authenticated %}
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Свернуть или раскрыть меню">☰ Меню</button>
+        {% endif %}
     </div>
-    {% endif %}
+
+    <div class="top-right">
+        {% if current_user.is_authenticated %}
+            {% if user_avatar_url %}
+            <img src="{{ user_avatar_url }}" class="user-avatar user-avatar-img" alt="Аватар">
+            {% else %}
+            <div class="user-avatar">{{ (current_user.name[:1] or '?')|upper }}</div>
+            {% endif %}
+            <span class="username">{{ current_user.name }}</span>
+            <a href="{{ url_for('logout') }}" class="logout-btn">Выйти</a>
+        {% endif %}
+    </div>
 </div>
+
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div class="flash-wrapper">
+      {% for message in messages %}
+        <div class="flash-message">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
 
 <div class="app-container">
 
     {% if current_user.is_authenticated %}
-    <aside class="sidebar">
-        <a href="{{ url_for('dashboard') }}" class="nav-link">Панель</a>
-        <a href="{{ url_for('student_dashboard') }}" class="nav-link">Студент</a>
-        <a href="{{ url_for('teacher_dashboard') }}" class="nav-link">Преподаватель</a>
+    <aside id="main-sidebar" class="sidebar">
+        <a href="{{ url_for('profile') }}" class="nav-link{% if request.endpoint == 'profile' %} active{% endif %}">Профиль</a>
+        <a href="/schedule" class="nav-link{% if request.path.startswith('/schedule') %} active{% endif %}">Расписание</a>
+        <a href="/notifications" class="nav-link{% if request.path.startswith('/notifications') %} active{% endif %}">Уведомления{% if unread_notifications|default(0) > 0 %} <span class="badge">{{ unread_notifications }}</span>{% endif %}</a>
+        <a href="{{ url_for('settings') }}" class="nav-link{% if request.endpoint == 'settings' %} active{% endif %}">Настройки</a>
+        <a href="{{ url_for('support') }}" class="nav-link{% if request.endpoint == 'support' %} active{% endif %}">Помощь и поддержка</a>
+        {% if current_user.role == 'student' %}
+            <a href="{{ url_for('student_dashboard') }}" class="nav-link{% if request.endpoint == 'student_dashboard' %} active{% endif %}">Мои оценки</a>
+            <a href="{{ url_for('export_student_grades') }}" class="nav-link">Экспорт оценок</a>
+        {% elif current_user.role == 'teacher' %}
+            <a href="{{ url_for('teacher_dashboard') }}" class="nav-link{% if request.endpoint == 'teacher_dashboard' %} active{% endif %}">Кабинет преподавателя</a>
+            <a href="{{ url_for('export_teacher_grades') }}" class="nav-link">Экспорт оценок</a>
+        {% elif current_user.role in ['admin', 'curator'] %}
+            <a href="{{ url_for('admin_dashboard') }}" class="nav-link{% if request.endpoint == 'admin_dashboard' %} active{% endif %}">Админ-панель</a>
+        {% endif %}
     </aside>
     {% endif %}
 
-    <main class="main-content">
+    <main class="main-content{% if not current_user.is_authenticated %} no-sidebar{% endif %}">
         {% block content %}{% endblock %}
+        <footer class="legal-footer subtle-footer">
+            <div class="legal-links">
+                <a href="/privacy">Политика конфиденциальности</a>
+                <a href="/terms">Пользовательское соглашение</a>
+                <a href="/security-policy">Политика безопасности</a>
+            </div>
+            <div class="legal-meta muted-text">
+                {{ college_name|default('StudentHubik') }} · Версия 1.0.0
+            </div>
+        </footer>
     </main>
 
 </div>
+
+
+<button id="back-to-top" class="back-to-top" type="button" aria-label="Наверх">↑</button>
+
+<script>
+(function () {
+  const forms = document.querySelectorAll('form');
+  forms.forEach((form) => {
+    const method = (form.getAttribute('method') || 'GET').toUpperCase();
+    if (method !== 'POST') return;
+    if (form.querySelector('input[name="csrf_token"]')) return;
+    if (!APP_CSRF_TOKEN) return;
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'csrf_token';
+    input.value = APP_CSRF_TOKEN;
+    form.appendChild(input);
+  });
+})();
+
+(function () {
+  const flashNodes = document.querySelectorAll('.flash-message');
+  flashNodes.forEach((node) => {
+    setTimeout(() => {
+      node.style.opacity = '0';
+      node.style.transform = 'translateY(-6px)';
+    }, 5200);
+  });
+})();
+
+(function () {
+  const toggles = document.querySelectorAll('.toggle-password');
+  toggles.forEach((button) => {
+    button.addEventListener('click', () => {
+      const targetId = button.getAttribute('data-target');
+      const input = document.getElementById(targetId);
+      if (!input) return;
+      const isPassword = input.type === 'password';
+      input.type = isPassword ? 'text' : 'password';
+      button.textContent = isPassword ? 'Скрыть' : 'Показать';
+    });
+  });
+})();
+
+(function () {
+  const backToTop = document.getElementById('back-to-top');
+  if (!backToTop) return;
+  const toggleVisibility = () => {
+    if (window.scrollY > 260) {
+      backToTop.classList.add('show');
+    } else {
+      backToTop.classList.remove('show');
+    }
+  };
+  window.addEventListener('scroll', toggleVisibility);
+  toggleVisibility();
+  backToTop.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+})();
+
+(function () {
+  const toggleBtn = document.getElementById('sidebar-toggle');
+  const sidebar = document.getElementById('main-sidebar');
+  if (!toggleBtn || !sidebar) return;
+  const syncToggleText = () => {
+    const collapsed = document.body.classList.contains('sidebar-collapsed');
+    toggleBtn.textContent = collapsed ? '☰ Показать меню' : '☰ Скрыть меню';
+  };
+  try {
+    const saved = localStorage.getItem('studenthubik_sidebar_collapsed');
+    if (saved === '1') document.body.classList.add('sidebar-collapsed');
+  } catch (e) {}
+  syncToggleText();
+  toggleBtn.addEventListener('click', () => {
+    const collapsed = document.body.classList.toggle('sidebar-collapsed');
+    try { localStorage.setItem('studenthubik_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    syncToggleText();
+  });
+})();
+
+</script>
 
 </body>
 </html>

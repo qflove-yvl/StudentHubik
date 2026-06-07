@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Уведомления</h1>
+
+<section class="card" style="margin-bottom:14px;">
+    <form method="GET" class="quick-actions">
+        <select class="input-field" name="status" style="margin:0;max-width:220px;">
+            <option value="all" {% if status_filter|default('all') == 'all' %}selected{% endif %}>Все уведомления</option>
+            <option value="unread" {% if status_filter|default('all') == 'unread' %}selected{% endif %}>Только непрочитанные</option>
+            <option value="read" {% if status_filter|default('all') == 'read' %}selected{% endif %}>Только прочитанные</option>
+        </select>
+        <button class="btn" type="submit">Применить</button>
+    </form>
+    <form method="POST" action="{{ url_for('mark_all_notifications_read') }}" style="margin-top:10px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn" type="submit">Отметить всё прочитанным</button>
+    </form>
+</section>
+
+<section class="card">
+    {% if notifications %}
+    <div class="table-wrap">
+        <table class="grade-table">
+            <thead><tr><th>Время</th><th>Заголовок</th><th>Сообщение</th><th>Статус</th></tr></thead>
+            <tbody>
+                {% for item in notifications %}
+                <tr>
+                    <td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>{{ item.title }}</td>
+                    <td>{{ item.message }}</td>
+                    <td>
+                        {% if item.is_read %}
+                            <span class="muted-text">Прочитано</span>
+                        {% else %}
+                            <form method="POST" action="{{ url_for('mark_notification_read', notification_id=item.id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="btn" type="submit">Отметить прочитанным</button>
+                            </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p class="muted-text">Новых уведомлений пока нет.</p>
+    {% endif %}
+</section>
+{% endblock %}

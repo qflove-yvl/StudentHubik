@@ -5,21 +5,42 @@
     <div class="auth-card">
 
         <div class="auth-header">
-            <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo">
-            <h1>StudentHubik</h1>
-            <p>Вход в систему</p>
+            <a href="{{ url_for('index') }}" class="auth-logo-link" aria-label="На главную">
+                <img src="{{ url_for('static', filename='logo.svg') }}" class="auth-logo" alt="StudentHubik">
+            </a>
+            <h1>Вход</h1>
+            <p>{{ college_name|default("StudentHubik") }} · вход по личному логину</p>
         </div>
 
-        <form method="POST">
-            <input type="email" name="email" class="input-field" placeholder="Email" required>
-            <input type="password" name="password" class="input-field" placeholder="Пароль" required>
-            <input type="hidden" name="role" value="{{ role }}">
+        <form method="POST" class="auth-form" id="login-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="text" name="login_identifier" class="input-field" placeholder="Логин (или email для старых аккаунтов)" autocomplete="username" required>
+
+            <div class="password-field-wrap">
+                <input id="login-password" type="password" name="password" class="input-field" placeholder="Пароль" required>
+                <button type="button" class="ghost-btn toggle-password" data-target="login-password">Показать</button>
+            </div>
+
+            <select name="role" class="input-field" required>
+                <option value="student" {% if role == 'student' %}selected{% endif %}>Студент</option>
+                <option value="teacher" {% if role == 'teacher' %}selected{% endif %}>Преподаватель</option>
+                <option value="admin" {% if role == 'admin' %}selected{% endif %}>Админ</option>
+            </select>
+
+            <label class="checkbox-inline" for="remember_me">
+                <input type="checkbox" id="remember_me" name="remember_me">
+                <span>Запомнить меня на этом устройстве</span>
+            </label>
+
             <button type="submit" class="btn auth-btn">Войти</button>
         </form>
 
-        <div class="auth-footer">
-            <span>Нет аккаунта?</span>
-            <a href="{{ url_for('register') }}">Регистрация</a>
+        <div class="auth-footer" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <div>
+                <span>Нет аккаунта?</span>
+                <a href="{{ url_for('register') }}">Регистрация</a>
+            </div>
+            <a href="/forgot-password">Забыли пароль?</a>
         </div>
 
     </div>
