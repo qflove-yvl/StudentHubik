@@ -2566,7 +2566,7 @@ def admin_dashboard():
     all_verified_students = User.query.filter_by(role='student', is_verified=True).all()
     all_grade_rows = Grade.query.all()
     group_risk_rows = build_group_risk_rows(all_groups, all_verified_students, all_grade_rows)
-
+    groups_by_id = {group.id: group.name for group in all_groups}
     curator_assignments = [
         {
             'teacher': teacher,
