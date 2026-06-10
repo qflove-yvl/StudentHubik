@@ -27,10 +27,9 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 <div class="topbar">
     <div class="top-left">
         <a href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('index') }}" class="top-logo-link" aria-label="На главную">
-            <img src="{{ url_for('static', filename='logo.svg') }}" class="top-logo" alt="StudentHubik">
+            <img src="{{ url_for('static', filename='logo_light.svg') }}" class="top-logo" alt="StudentHubik" id="top-logo">
         </a>
     </div>
-
     <div class="top-center">
         {% if current_user.is_authenticated %}
         <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Свернуть или раскрыть меню">☰ Меню</button>
@@ -97,8 +96,25 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
 
 </div>
 
-
 <button id="back-to-top" class="back-to-top" type="button" aria-label="Наверх">↑</button>
+
+<script>
+var LOGO_LIGHT = "{{ url_for('static', filename='logo_light.svg') }}";
+var LOGO_DARK  = "{{ url_for('static', filename='logo_dark.svg') }}";
+
+function updateLogos() {
+  var theme = document.documentElement.getAttribute('data-theme');
+  var src = (theme === 'dark') ? LOGO_DARK : LOGO_LIGHT;
+  document.querySelectorAll('.site-logo').forEach(function(el) { el.src = src; });
+}
+
+document.getElementById('top-logo').classList.add('site-logo');
+updateLogos();
+
+new MutationObserver(updateLogos).observe(document.documentElement, {
+  attributes: true, attributeFilter: ['data-theme']
+});
+</script>
 
 <script>
 (function () {
@@ -176,7 +192,6 @@ const APP_CSRF_TOKEN = {{ _csrf|tojson }};
     syncToggleText();
   });
 })();
-
 </script>
 
 </body>

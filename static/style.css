@@ -58,7 +58,7 @@ body {
 .top-center { display: flex; justify-content: center; }
 .top-center-stack { display:flex; flex-direction:column; align-items:center; gap:4px; }
 .top-badge { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-.top-logo { width: 152px; height: 152px; object-fit: contain; filter: drop-shadow(0 14px 26px rgba(0,0,0,.34)); transform: translateY(6px); }
+.top-logo { width: 200px; height: 200px; object-fit: contain; filter: drop-shadow(0 14px 26px rgba(0,0,0,.34)); transform: translateY(6px); }
 .sidebar-toggle { border: 1px solid var(--border); background: var(--surface-strong); color: var(--text); border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; }
 .sidebar-toggle:hover { box-shadow: 0 10px 22px rgba(99,102,241,.28); }
 .user-avatar {
@@ -231,7 +231,7 @@ body {
 .hidden { display: none; }
 .select-highlight { border-color: rgba(167,139,250,.9); }
 .hint-text { font-size: 13px; margin-top: 6px; }
-.home-main-logo { width: 250px; height: 250px; margin-bottom: 8px; }
+.home-main-logo { width: 320px; height: 320px; margin-bottom: 8px; }
 
 .teacher-header-row { display: flex; justify-content: space-between; gap: 14px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
 .teacher-metrics-grid .card-value { font-size: clamp(24px, 2.7vw, 34px); }
@@ -327,7 +327,7 @@ html[data-animations="off"] *,
 
 @media (max-width: 980px) {
     .topbar { height: 112px; padding: 0 12px; grid-template-columns: auto 1fr auto; gap: 10px; }
-    .top-logo { width: 112px; height: 112px; transform: translateY(4px); }
+    .top-logo { width: 150px; height: 150px; transform: translateY(4px); }
     .username { display: none; }
     .app-container { flex-direction: column; min-height: auto; }
     .sidebar {
@@ -690,7 +690,7 @@ body.sidebar-collapsed .sidebar .nav-link { opacity: 0; }
     box-shadow: none;
 }
 
-.auth-logo { width: 184px; height: 184px; }
+.auth-logo { width: 240px; height: 240px; }
 .auth-card { max-width: 560px; padding: 28px; background: rgba(255,255,255,0.065); }
 .auth-header { margin-bottom: 14px; }
 

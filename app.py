@@ -18,7 +18,7 @@ import logging
 import smtplib
 from email.message import EmailMessage
 from logging.handlers import RotatingFileHandler
-
+from urllib.parse import quote
 from sqlalchemy import func, inspect, text
 
 try:
@@ -1520,7 +1520,7 @@ def download_schedule(file_id):
         app.config.get('SCHEDULE_UPLOAD_DIR'),
         schedule_file.stored_name,
         as_attachment=True,
-        download_name=schedule_file.original_name
+        download_name=schedule_file.original_name.encode('utf-8').decode('latin-1', errors='replace')
     )
 
 
@@ -2411,13 +2411,14 @@ def export_curator_report():
     if report_period == 'semester':
         start_month = 1 if now.month <= 6 else 7
         start_at = datetime(now.year, start_month, 1)
-        title = 'semester'
+        title = 'семестр'
     else:
         start_at = datetime(now.year, now.month, 1)
-        title = 'month'
+        title = now.strftime('%B_%Y')
 
     students_in_group = User.query.filter_by(role='student', is_verified=True, group_id=current_user.group_id).order_by(User.name).all()
-    student_ids = [student.id for student in students_in_group]
+    student_ids = [s.id for s in students_in_group]
+
     grades = []
     if student_ids:
         grades = (
@@ -2427,40 +2428,88 @@ def export_curator_report():
             .all()
         )
 
-    students_by_id = {student.id: student.name for student in students_in_group}
-    curator_group = Group.query.get(current_user.group_id)
+    curator_group = db.session.get(Group, current_user.group_id)
     group_name = curator_group.name if curator_group else 'group'
 
-    if openpyxl:
-        workbook = openpyxl.Workbook()
-        sheet = workbook.active
-        sheet.title = 'Ведомость'
-        sheet.append(['Группа', group_name, 'Период', title])
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+
+    header_font = openpyxl.styles.Font(bold=True, color='FFFFFF')
+    header_fill = openpyxl.styles.PatternFill('solid', fgColor='2563EB')
+    center = openpyxl.styles.Alignment(horizontal='center')
+    thin = openpyxl.styles.Side(style='thin')
+    border = openpyxl.styles.Border(left=thin, right=thin, top=thin, bottom=thin)
+    red_fill = openpyxl.styles.PatternFill('solid', fgColor='FCA5A5')
+    green_fill = openpyxl.styles.PatternFill('solid', fgColor='86EFAC')
+
+    subjects_map = {}
+    for item in grades:
+        subject_name = item.subject.name if item.subject else '—'
+        subjects_map.setdefault(subject_name, []).append(item)
+
+    for subject_name, subject_grades in sorted(subjects_map.items()):
+        dates = sorted({item.graded_at.date() for item in subject_grades if item.graded_at})
+        sheet = workbook.create_sheet(title=subject_name[:31])
+
+        sheet.cell(1, 1, 'Группа'); sheet.cell(1, 1).font = header_font; sheet.cell(1, 1).fill = header_fill
+        sheet.cell(1, 2, group_name)
+        sheet.cell(2, 1, 'Предмет'); sheet.cell(2, 1).font = header_font; sheet.cell(2, 1).fill = header_fill
+        sheet.cell(2, 2, subject_name)
+        sheet.cell(3, 1, 'Период'); sheet.cell(3, 1).font = header_font; sheet.cell(3, 1).fill = header_fill
+        sheet.cell(3, 2, title)
         sheet.append([])
-        sheet.append(['Студент', 'Предмет', 'Оценка/Н', 'Семестр', 'Комментарий', 'Дата'])
-        for cell in sheet[3]:
-            cell.font = openpyxl.styles.Font(bold=True, color='FFFFFF')
-            cell.fill = openpyxl.styles.PatternFill('solid', fgColor='2563EB')
-        for item in grades:
-            sheet.append([
-                students_by_id.get(item.student_id, '—'),
-                item.subject.name if item.subject else '—',
-                item.mark or item.grade or '',
-                item.semester,
-                item.comment or '',
-                item.graded_at.strftime('%d.%m.%Y') if item.graded_at else ''
-            ])
-        widths = [34, 26, 12, 10, 42, 14]
-        for index, width in enumerate(widths, start=1):
-            sheet.column_dimensions[openpyxl.utils.get_column_letter(index)].width = width
-        output = io.BytesIO()
-        workbook.save(output)
-        output.seek(0)
-        return Response(
-            output.getvalue(),
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            headers={'Content-Disposition': f'attachment; filename=curator_{group_name}_{title}.xlsx'}
-        )
+
+        headers = ['№', 'ФИО студента'] + [d.strftime('%d.%m') for d in dates] + ['Пропуски (Н)', 'Итоговая']
+        sheet.append(headers)
+        hrow = sheet.max_row
+        for col in range(1, len(headers) + 1):
+            c = sheet.cell(hrow, col)
+            c.font = header_font; c.fill = header_fill; c.alignment = center; c.border = border
+
+        for num, student in enumerate(students_in_group, start=1):
+            st_grades = [g for g in subject_grades if g.student_id == student.id]
+            grades_by_date = {g.graded_at.date(): g for g in st_grades if g.graded_at}
+            numeric_values = []
+            absences = 0
+            row = [num, student.name]
+            for d in dates:
+                g = grades_by_date.get(d)
+                if g:
+                    if (g.mark or '').upper() == 'Н':
+                        row.append('Н'); absences += 1
+                    elif g.grade is not None:
+                        row.append(g.grade); numeric_values.append(g.grade)
+                    else:
+                        row.append('')
+                else:
+                    row.append('')
+            avg = round(sum(numeric_values) / len(numeric_values), 2) if numeric_values else ''
+            row += [absences if absences else '', avg]
+            sheet.append(row)
+            last_col = len(headers)
+            avg_cell = sheet.cell(sheet.max_row, last_col)
+            avg_cell.alignment = center
+            if isinstance(avg, float):
+                avg_cell.fill = red_fill if avg < 3 else (green_fill if avg >= 4 else openpyxl.styles.PatternFill())
+
+        sheet.column_dimensions['A'].width = 4
+        sheet.column_dimensions['B'].width = 32
+        for i in range(3, len(headers) + 1):
+            sheet.column_dimensions[openpyxl.utils.get_column_letter(i)].width = 10
+
+    if not workbook.sheetnames:
+        sheet = workbook.create_sheet('Нет данных')
+        sheet.cell(1, 1, 'За выбранный период оценок нет')
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    return Response(
+        output.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{quote(f'curator_{group_name}_{title}.xlsx')}"}
+    )
 
     stream = io.StringIO()
     writer = csv.writer(stream)
@@ -2478,7 +2527,7 @@ def export_curator_report():
     return Response(
         '\ufeff' + stream.getvalue(),
         mimetype='text/csv; charset=utf-8',
-        headers={'Content-Disposition': f'attachment; filename=curator_{group_name}_{title}.csv'}
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{quote(f'curator_{group_name}_{title}.csv')}"}
     )
 
 
