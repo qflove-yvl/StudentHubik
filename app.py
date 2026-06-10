@@ -627,15 +627,15 @@ def looks_like_group_name(text_value):
     if not any(('А' <= ch <= 'Я') or ('A' <= ch <= 'Z') for ch in candidate):
         return False
 
-    # типичные не-групповые значения
-    banned_words = ('ПОНЕД', 'ВТОР', 'СРЕД', 'ЧЕТВ', 'ПЯТ', 'СУББ', 'ПАРА', 'КАБ', 'АУД', 'ВРЕМЯ')
+    banned_words = ('ПОНЕД', 'ВТОР', 'СРЕД', 'ЧЕТВ', 'ПЯТ', 'СУББ', 'ПАРА', 'КАБ', 'АУД', 'ВРЕМЯ',
+                    'АЛГОР', 'ПРОГРАМ', 'ПСИХ', 'МДК', 'МАТЕМ', 'ФИЗИК', 'ИСТОР', 'ЛИТЕР',
+                    'ЭКЗАМ', 'ПРАКТ', 'КУЛЬТ', 'ИНОСТР', 'ГЕОГР', 'ХИМИЯ', 'БИОЛОГ')
     if any(word in candidate for word in banned_words):
         return False
     if re.fullmatch(r'\d{1,2}[:.]\d{2}', candidate):
         return False
 
-    # нормальные шаблоны групп: ИС24-01/2, МР25-01-1П, ТД-23 и т.п.
-    compact = candidate.replace(' ', '')
+    compact = candidate.replace(' ', '').replace('\t', '')
     if re.search(r'[А-ЯA-Z]{1,8}\d{1,3}', compact):
         return True
 
@@ -709,136 +709,96 @@ def parse_schedule_matrix(sheet_name, matrix):
     if max_cols == 0:
         return []
 
-    def extract_groups_from_row(row):
+    def get_cell(row, col):
+        return normalize_cell_value(row[col]) if col < len(row) else ''
+
+    # Ищем строку заголовка: >= 2 групп И col[1] содержит '№' или пусто (не цифра)
+    groups = []
+    header_row_idx = None
+    for row_idx, row in enumerate(matrix):
+        slot_cell = get_cell(row, 1).strip()
+        if slot_cell.isdigit():
+            continue  # строка с данными — не заголовок
         candidates = []
         for col_idx in range(max_cols):
-            value = normalize_cell_value(row[col_idx]) if col_idx < len(row) else ''
-            if looks_like_group_name(value):
-                candidates.append((value.upper(), col_idx))
-
-        # Убираем дубли merged-ячеек подряд (в merged-блоках одно имя может тянуться на 2-5 колонок)
+            val = get_cell(row, col_idx)
+            if looks_like_group_name(val):
+                candidates.append((val.upper(), col_idx))
+        # убираем дубли merged-ячеек
         unique = []
-        last_name = None
+        last = None
         for name, col in candidates:
-            if name == last_name:
-                continue
-            unique.append((name, col))
-            last_name = name
-        return unique
+            if name != last:
+                unique.append((name, col))
+                last = name
+        if len(unique) >= 2:
+            header_row_idx = row_idx
+            groups = []
+            for idx, (name, col) in enumerate(unique):
+                end_col = unique[idx + 1][1] if idx + 1 < len(unique) else max_cols
+                groups.append((name, col, end_col))
+            break  # берём только первый заголовок
 
-    def extract_slot_number(cells):
-        for cell_value in cells:
-            match = re.search(r'\b(1[0-4]|[1-9])\b', cell_value)
-            if match:
-                slot = int(match.group(1))
-                if 1 <= slot <= 14:
-                    return slot
-        return None
-
-    # В одном листе может быть несколько блоков с разными строками заголовков групп.
-    header_rows = {}
-    for row_idx in range(len(matrix)):
-        groups_here = extract_groups_from_row(matrix[row_idx])
-        if len(groups_here) >= 2:
-            header_rows[row_idx] = groups_here
-
-    if not header_rows:
+    if not groups:
         return []
 
-    lesson_map = {}
-    current_day = ''
-    inferred_day_idx = 0
-    previous_slot = None
-    active_groups = []
+    results = []
+    last_pair_idx = {}
+    current_day = DAY_NAMES[0]
 
-    for row_idx in range(len(matrix)):
+    for row_idx in range(header_row_idx + 1, len(matrix)):
         row = matrix[row_idx]
 
-        # Если встретили новую строку заголовков групп — переключаем контекст.
-        if row_idx in header_rows:
-            active_groups = sorted(header_rows[row_idx], key=lambda x: x[1])
-            current_day = ''
-            previous_slot = None
-            continue
+        # Определяем день из col[0]
+        day_cell = get_cell(row, 0).upper().replace('.', '').strip()
+        for alias, normalized_day in DAY_ALIASES.items():
+            if alias in day_cell:
+                current_day = normalized_day
+                break
 
-        if not active_groups:
-            continue
+        slot_cell = get_cell(row, 1).strip()
 
-        left_cells = [normalize_cell_value(row[c]) if c < len(row) else '' for c in range(min(5, max_cols))]
+        if re.fullmatch(r'1[0-4]|[1-9]', slot_cell):
+            slot = int(slot_cell)
+            pair_number = (slot + 1) // 2
 
-        for left_cell in left_cells:
-            upper_cell = left_cell.upper().replace('.', '').strip()
-            for alias, normalized_day in DAY_ALIASES.items():
-                if alias in upper_cell:
-                    current_day = normalized_day
-                    if normalized_day in DAY_NAMES:
-                        inferred_day_idx = DAY_NAMES.index(normalized_day)
-                    break
-
-        slot_number = extract_slot_number(left_cells)
-        if slot_number is None:
-            continue
-
-        if not current_day:
-            current_day = DAY_NAMES[min(inferred_day_idx, len(DAY_NAMES) - 1)]
-        elif previous_slot and slot_number < previous_slot and slot_number <= 2:
-            inferred_day_idx = min(inferred_day_idx + 1, len(DAY_NAMES) - 1)
-            current_day = DAY_NAMES[inferred_day_idx]
-
-        previous_slot = slot_number
-        pair_number = (slot_number + 1) // 2
-        half_key = 1 if slot_number % 2 == 1 else 2
-
-        for idx, (group_name, start_col) in enumerate(active_groups):
-            end_col = active_groups[idx + 1][1] if idx + 1 < len(active_groups) else max_cols
-            segment_values = []
-            for c in range(start_col, end_col):
-                if c >= len(row):
+            for (gname, gcol, gend) in groups:
+                cells = [get_cell(row, c) for c in range(gcol, gend)]
+                data = [c for c in cells if c and not re.fullmatch(r'[\d\s/]+', c)]
+                if not data:
                     continue
-                value = normalize_cell_value(row[c])
-                if value and not looks_like_group_name(value):
-                    segment_values.append(value)
+                content = ' | '.join(data)[:390]
+                key = (gname, current_day, pair_number)
+                if key not in last_pair_idx:
+                    results.append({
+                        'sheet_name': sheet_name,
+                        'group_name': gname,
+                        'day_name': current_day,
+                        'pair_number': pair_number,
+                        'time_range': PAIR_TIME_RANGES.get(pair_number, 'Время уточняется'),
+                        'content': content,
+                        'content_half_1': content if slot % 2 == 1 else '',
+                        'content_half_2': content if slot % 2 == 0 else '',
+                    })
+                    last_pair_idx[key] = len(results) - 1
 
-            if not segment_values:
-                continue
-
-            unique_values = []
-            for value in segment_values:
-                if value not in unique_values:
-                    unique_values.append(value)
-
-            payload = ' | '.join(unique_values)[:390]
-            map_key = (sheet_name, group_name, current_day, pair_number)
-            lesson_map.setdefault(map_key, {1: '', 2: ''})
-            if payload:
-                previous = lesson_map[map_key][half_key]
-                lesson_map[map_key][half_key] = payload if not previous else f'{previous} / {payload}'[:390]
-
-    results = []
-    for (sheet_value, group_name, day_name, pair_number), halves in lesson_map.items():
-        half_1 = halves.get(1, '')
-        half_2 = halves.get(2, '')
-        if half_1 and half_2 and half_1 != half_2:
-            combined = f'{half_1} || {half_2}'[:590]
-        else:
-            combined = (half_1 or half_2)[:590]
-
-        if not combined:
-            continue
-
-        results.append({
-            'sheet_name': sheet_value,
-            'group_name': group_name,
-            'day_name': day_name,
-            'pair_number': pair_number,
-            'time_range': PAIR_TIME_RANGES.get(pair_number, 'Время уточняется'),
-            'content': combined,
-            'content_half_1': half_1,
-            'content_half_2': half_2,
-        })
+        elif not slot_cell:
+            # Строка кабинетов
+            for (gname, gcol, gend) in groups:
+                cells = [get_cell(row, c) for c in range(gcol, gend)]
+                cab_cells = [c for c in cells if c and not looks_like_group_name(c)]
+                if not cab_cells:
+                    continue
+                cab = ' / '.join(cab_cells)
+                for key in reversed(list(last_pair_idx.keys())):
+                    if key[0] == gname:
+                        idx = last_pair_idx[key]
+                        old = results[idx]['content']
+                        if cab not in old:
+                            results[idx]['content'] = (old + ' | ' + cab)[:590]
+                        break
 
     results.sort(key=lambda item: (
-        item['sheet_name'],
         item['group_name'],
         DAY_NAMES.index(item['day_name']) if item['day_name'] in DAY_NAMES else 99,
         item['pair_number']
